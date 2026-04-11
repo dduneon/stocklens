@@ -197,9 +197,14 @@ def collect_ohlcv(date_str: str) -> int:
             except Exception as e:
                 logger.warning("OHLCV 수집 실패 (%s): %s", market, e)
 
-        if rows:
-            with get_session() as s:
-                total = _upsert(s, DailyOHLCV, rows, ["ticker", "date"])
+        # 비거래일(주말/공휴일)이면 close가 모두 0 → 저장 건너뜀
+        rows = [r for r in rows if r.get("close")]
+        if not rows:
+            logger.info("ohlcv: 비거래일(%s), 저장 건너뜀", date_str)
+            _log_done(log_id, 0)
+            return 0
+        with get_session() as s:
+            total = _upsert(s, DailyOHLCV, rows, ["ticker", "date"])
         _log_done(log_id, total)
         logger.info("ohlcv upserted: %d rows", total)
     except Exception as e:
@@ -404,7 +409,10 @@ def run_backfill(days: int = 30) -> None:
         date_str = current.strftime("%Y%m%d")
         logger.info("backfill: %s", date_str)
         try:
-            collect_ohlcv(date_str)
+            ohlcv_cnt = collect_ohlcv(date_str)
+            if ohlcv_cnt == 0:
+                current += timedelta(days=1)
+                continue  # 비거래일이면 나머지 건너뜀
             collect_fundamentals(date_str)
             collect_market_cap(date_str)
             collect_investor_trading(date_str)
