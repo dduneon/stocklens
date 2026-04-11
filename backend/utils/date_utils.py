@@ -25,3 +25,17 @@ def fmt_datetime(dt) -> str:
         return dt.strftime("%Y-%m-%d")
     s = str(dt)
     return s[:10] if len(s) >= 10 else s
+
+
+def latest_trading_date() -> str:
+    """DB에서 가장 최근 거래일을 YYYYMMDD 형식으로 반환.
+    DB가 비어있거나 연결 실패 시 오늘 날짜를 반환.
+    """
+    try:
+        from db.repository import get_latest_available_date
+        d = get_latest_available_date()
+        if d:
+            return d.replace("-", "")
+    except Exception:
+        pass
+    return today_str()

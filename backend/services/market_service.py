@@ -3,7 +3,7 @@ import logging
 from pykrx import stock as krx_stock
 
 from cache.ttl_cache import cache
-from utils.date_utils import today_str, n_days_ago, fmt_datetime
+from utils.date_utils import today_str, n_days_ago, fmt_datetime, latest_trading_date
 from utils.serializers import ohlcv_df_to_chart
 from config import Config
 from services.stock_service import get_market_ohlcv_snapshot
@@ -20,7 +20,7 @@ def get_market_summary(market: str = "KOSPI") -> dict:
     if cached is not None:
         return cached
 
-    date = today_str()
+    date = latest_trading_date()
     records = get_market_ohlcv_snapshot(date, market)
 
     if not records:

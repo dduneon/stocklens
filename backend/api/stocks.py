@@ -10,7 +10,7 @@ from services.stock_service import (
     get_investor_trading,
     get_financial_statements,
 )
-from utils.date_utils import today_str, n_days_ago
+from utils.date_utils import today_str, n_days_ago, latest_trading_date
 
 stocks_bp = Blueprint("stocks", __name__)
 
@@ -18,7 +18,7 @@ stocks_bp = Blueprint("stocks", __name__)
 @stocks_bp.get("/")
 def list_stocks():
     market = request.args.get("market", "KOSPI")
-    date = request.args.get("date", today_str())
+    date = request.args.get("date", latest_trading_date())
     search = request.args.get("search", "").strip().lower()
 
     # OHLCV + 시가총액 + 펀더멘털 병합
@@ -75,7 +75,7 @@ def list_stocks():
 @stocks_bp.get("/<ticker>")
 def stock_detail(ticker: str):
     name = get_ticker_name(ticker)
-    date = today_str()
+    date = latest_trading_date()
     from_date = n_days_ago(365)
 
     ohlcv = get_stock_ohlcv(ticker, from_date, date)
