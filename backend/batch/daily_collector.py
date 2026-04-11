@@ -15,6 +15,17 @@ from datetime import datetime, timezone
 # backend/ 경로 주입
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# pykrx 내부 logging 버그(TypeError: not all arguments converted) 무시
+class _PykrxLogFilter(logging.Filter):
+    def filter(self, record):
+        try:
+            record.getMessage()
+            return True
+        except TypeError:
+            return False
+
+logging.root.addFilter(_PykrxLogFilter())
+
 from pykrx import stock as krx_stock
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
