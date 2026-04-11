@@ -7,6 +7,8 @@ from services.stock_service import (
     get_stock_ohlcv,
     get_stock_fundamental,
     get_ticker_name,
+    get_investor_trading,
+    get_financial_statements,
 )
 from utils.date_utils import today_str, n_days_ago
 
@@ -121,5 +123,28 @@ def stock_fundamentals(ticker: str):
         "ticker": ticker,
         "from": from_date,
         "to": to_date,
+        "data": data,
+    })
+
+
+@stocks_bp.get("/<ticker>/investor-trading")
+def stock_investor_trading(ticker: str):
+    days = min(int(request.args.get("days", 30)), 365)
+    from_date = request.args.get("from_date", n_days_ago(days))
+    to_date = request.args.get("to_date", today_str())
+    data = get_investor_trading(ticker, from_date, to_date)
+    return jsonify({
+        "ticker": ticker,
+        "from": from_date,
+        "to": to_date,
+        "data": data,
+    })
+
+
+@stocks_bp.get("/<ticker>/financials")
+def stock_financials(ticker: str):
+    data = get_financial_statements(ticker)
+    return jsonify({
+        "ticker": ticker,
         "data": data,
     })

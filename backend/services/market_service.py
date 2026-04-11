@@ -1,6 +1,7 @@
-"""시장 요약 및 KOSPI 지수 서비스."""
+"""시장 요약 및 KOSPI/KOSDAQ 지수 서비스."""
 import logging
-from pykrx import stock
+from pykrx import stock as krx_stock
+
 from cache.ttl_cache import cache
 from utils.date_utils import today_str, n_days_ago, fmt_datetime
 from utils.serializers import ohlcv_df_to_chart
@@ -14,7 +15,6 @@ KOSDAQ_INDEX_TICKER = "2001"
 
 
 def get_market_summary(market: str = "KOSPI") -> dict:
-    """상승/하락 종목 수, 거래대금 상위, 등락률 상위/하위 반환."""
     cache_key = f"market_summary:{market}"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -54,7 +54,7 @@ def get_market_summary(market: str = "KOSPI") -> dict:
 
 
 def get_index_chart(market: str = "KOSPI", days: int = 90) -> list[dict]:
-    """KOSPI/KOSDAQ 지수 OHLCV 반환."""
+    """KOSPI/KOSDAQ 지수 OHLCV — pykrx 직접 조회 (지수 데이터는 DB에 미적재)."""
     ticker = KOSPI_INDEX_TICKER if market == "KOSPI" else KOSDAQ_INDEX_TICKER
     cache_key = f"index_chart:{market}:{days}"
     cached = cache.get(cache_key)
@@ -64,16 +64,14 @@ def get_index_chart(market: str = "KOSPI", days: int = 90) -> list[dict]:
     try:
         from_date = n_days_ago(days)
         to_date = today_str()
-        df = stock.get_index_ohlcv(from_date, to_date, ticker)
+        df = krx_stock.get_index_ohlcv(from_date, to_date, ticker)
         if df.empty:
             return []
         df.index.name = "date"
         df.reset_index(inplace=True)
-        # 컬럼: 날짜, 시가, 고가, 저가, 종가, 거래량, 거래대금, 상장시가총액
         df = df.iloc[:, :7]
         df.columns = ["date", "open", "high", "low", "close", "volume", "trading_value"]
         df["date"] = df["date"].apply(fmt_datetime)
-        # change_pct 계산
         df["change_pct"] = df["close"].pct_change() * 100
         result = ohlcv_df_to_chart(df)
         cache.set(cache_key, result, ttl=Config.CACHE_TTL_MARKET)

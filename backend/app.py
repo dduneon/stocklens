@@ -11,6 +11,7 @@ from flask_cors import CORS
 
 from config import Config
 from krx_session.manager import login_krx, is_logged_in
+from db.engine import ping as db_ping
 
 logging.basicConfig(
     level=logging.DEBUG if Config.DEBUG else logging.INFO,
@@ -34,10 +35,13 @@ def create_app() -> Flask:
     app.register_blueprint(stocks_bp, url_prefix="/api/stocks")
     app.register_blueprint(recommendations_bp, url_prefix="/api/recommendations")
 
-    # ── KRX 세션 상태 엔드포인트 ──────────────────────────────────────
+    # ── 상태 엔드포인트 ───────────────────────────────────────────────
     @app.get("/api/session/status")
     def session_status():
-        return jsonify({"logged_in": is_logged_in()})
+        return jsonify({
+            "logged_in": is_logged_in(),
+            "db": db_ping(),
+        })
 
     # ── 프론트엔드 정적 파일 서빙 ─────────────────────────────────────
     @app.route("/", defaults={"path": ""})
