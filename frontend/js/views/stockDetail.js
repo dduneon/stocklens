@@ -9,10 +9,10 @@ let _ticker = null;
 let _ohlcvAll = [];
 
 const PERIODS = [
-  { label: '1개월', days: 30 },
-  { label: '3개월', days: 90 },
-  { label: '6개월', days: 180 },
-  { label: '1년', days: 365 },
+  { label: '1개월', days: 30,  unit: 'day'   },
+  { label: '3개월', days: 90,  unit: 'day'   },
+  { label: '6개월', days: 180, unit: 'week'  },
+  { label: '1년',   days: 365, unit: 'month' },
 ];
 let _activePeriod = 1; // 기본 3개월
 
@@ -155,7 +155,7 @@ function renderDetail(root, ticker, detail, fundamentals, priceByDate = {}) {
   const canvas = root.querySelector('#candleChart');
   const periodData = filterByPeriod(_ohlcvAll, _activePeriod);
   if (canvas) {
-    _chart = createCandlestickChart(canvas, periodData);
+    _chart = createCandlestickChart(canvas, periodData, PERIODS[_activePeriod].unit);
   }
 
   // 기간 전환
@@ -165,7 +165,7 @@ function renderDetail(root, ticker, detail, fundamentals, priceByDate = {}) {
       root.querySelectorAll('#periodBtns .btn-seg').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       const data = filterByPeriod(_ohlcvAll, _activePeriod);
-      updateCandlestickChart(_chart, data);
+      updateCandlestickChart(_chart, data, PERIODS[_activePeriod].unit);
     });
   });
 }
