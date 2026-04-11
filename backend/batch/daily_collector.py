@@ -77,7 +77,29 @@ def _log_fail(log_id: int, err: str) -> None:
 
 # ── upsert 헬퍼 ────────────────────────────────────────────────────────────
 
+# tickers 테이블에 없는 종목은 FK 위반 → 캐시로 필터링
+_known_tickers: set[str] = set()
+
+def _load_known_tickers(session) -> None:
+    global _known_tickers
+    if not _known_tickers:
+        from sqlalchemy import select
+        rows = session.execute(select(Ticker.ticker)).scalars().all()
+        _known_tickers = set(rows)
+
+def _filter_by_ticker(rows: list[dict]) -> list[dict]:
+    """tickers 테이블에 없는 종목 행 제거."""
+    if not _known_tickers:
+        return rows
+    return [r for r in rows if r.get("ticker") in _known_tickers]
+
 def _upsert(session, model, rows: list[dict], conflict_cols: list[str]) -> int:
+    if not rows:
+        return 0
+    # ticker FK가 있는 테이블이면 필터링
+    if "ticker" in conflict_cols and model.__tablename__ != "tickers":
+        _load_known_tickers(session)
+        rows = _filter_by_ticker(rows)
     if not rows:
         return 0
     stmt = pg_insert(model.__table__).values(rows)
@@ -130,6 +152,8 @@ def sync_tickers(date_str: str) -> int:
 
         with get_session() as s:
             total = _upsert(s, Ticker, rows, ["ticker"])
+        # 캐시 갱신
+        _known_tickers.update(r["ticker"] for r in rows)
         _log_done(log_id, total)
         logger.info("tickers upserted: %d", total)
     except Exception as e:
@@ -361,9 +385,12 @@ def run_historical_load(days: int = 365) -> None:
 
 def run_backfill(days: int = 30) -> None:
     """과거 N일치 데이터를 날짜별로 순차 적재."""
-    from utils.date_utils import n_days_ago
     import time
-    from datetime import timedelta, date as dt_date
+    from datetime import timedelta
+
+    # tickers 테이블을 먼저 채워야 FK 위반이 안 남
+    logger.info("종목 목록 동기화 중...")
+    sync_tickers(today_str())
 
     start = datetime.strptime(n_days_ago(days), "%Y%m%d").date()
     end = datetime.strptime(today_str(), "%Y%m%d").date()
@@ -376,7 +403,8 @@ def run_backfill(days: int = 30) -> None:
             collect_ohlcv(date_str)
             collect_fundamentals(date_str)
             collect_market_cap(date_str)
-            time.sleep(1)  # KRX 서버 부하 방지
+            collect_investor_trading(date_str)
+            time.sleep(0.5)  # KRX 서버 부하 방지
         except Exception as e:
             logger.warning("backfill 실패 (%s): %s", date_str, e)
         current += timedelta(days=1)
