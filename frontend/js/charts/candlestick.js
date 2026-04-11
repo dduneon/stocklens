@@ -11,10 +11,18 @@ const COLORS = {
   grid: '#e5e8eb',
 };
 
+function yRange(data) {
+  const lows = data.map(d => d.l).filter(v => v != null);
+  const highs = data.map(d => d.h).filter(v => v != null);
+  if (!lows.length) return {};
+  const min = Math.min(...lows);
+  const max = Math.max(...highs);
+  const pad = (max - min) * 0.05;
+  return { min: min - pad, max: max + pad };
+}
+
 export function createCandlestickChart(canvas, data) {
   if (!canvas || !data || !data.length) return null;
-
-  const labels = data.map(d => d.x);
 
   const candleData = data.map(d => ({
     x: d.x,
@@ -29,9 +37,10 @@ export function createCandlestickChart(canvas, data) {
     y: d.v,
   }));
 
+  const { min: yMin, max: yMax } = yRange(data);
+
   const chart = new Chart(canvas, {
     data: {
-      labels,
       datasets: [
         {
           type: 'candlestick',
@@ -103,6 +112,15 @@ export function createCandlestickChart(canvas, data) {
       },
       scales: {
         x: {
+          type: 'timeseries',
+          time: {
+            unit: 'day',
+            displayFormats: {
+              day: 'MM/dd',
+              week: 'yy/MM',
+              month: 'yy/MM',
+            },
+          },
           grid: { color: COLORS.grid, drawBorder: false },
           ticks: {
             color: '#8b95a1',
@@ -112,6 +130,8 @@ export function createCandlestickChart(canvas, data) {
         },
         y: {
           position: 'right',
+          min: yMin,
+          max: yMax,
           grid: { color: COLORS.grid, drawBorder: false },
           ticks: {
             color: '#8b95a1',
@@ -137,11 +157,13 @@ export function createCandlestickChart(canvas, data) {
 
 export function updateCandlestickChart(chart, data) {
   if (!chart) return;
-  chart.data.labels = data.map(d => d.x);
   chart.data.datasets[0].data = data.map(d => ({ x: d.x, o: d.o, h: d.h, l: d.l, c: d.c }));
   chart.data.datasets[1].data = data.map(d => ({ x: d.x, y: d.v }));
   chart.data.datasets[1].backgroundColor = data.map(d =>
     d.c >= d.o ? 'rgba(240,68,82,0.2)' : 'rgba(30,107,220,0.2)'
   );
-  chart.update('none');
+  const { min: yMin, max: yMax } = yRange(data);
+  chart.options.scales.y.min = yMin;
+  chart.options.scales.y.max = yMax;
+  chart.update();
 }
