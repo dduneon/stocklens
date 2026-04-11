@@ -40,14 +40,15 @@ async function loadDetail(root, ticker) {
       api.stocks.fundamentals(ticker, { days: 365 }),
     ]);
     _ohlcvAll = ohlcv.data || [];
-    renderDetail(root, ticker, detail, fundamentals.data || []);
+    const priceByDate = Object.fromEntries(_ohlcvAll.map(d => [d.x, d.c]));
+    renderDetail(root, ticker, detail, fundamentals.data || [], priceByDate);
   } catch (err) {
     root.innerHTML = '';
     showError(root, `데이터 로드 실패: ${err.message}`);
   }
 }
 
-function renderDetail(root, ticker, detail, fundamentals) {
+function renderDetail(root, ticker, detail, fundamentals, priceByDate = {}) {
   const name = detail.name || ticker;
   const close = detail.close;
   const cp = detail.change_pct;
@@ -129,7 +130,7 @@ function renderDetail(root, ticker, detail, fundamentals) {
               ${fundamentals.slice(-20).reverse().map(f => `
                 <tr>
                   <td class="left" style="color:var(--color-text-tertiary)">${f.date || '-'}</td>
-                  <td>-</td>
+                  <td>${priceByDate[f.date] ? formatNumber(priceByDate[f.date]) : '-'}</td>
                   <td>${f.eps ? formatNumber(f.eps) : '-'}</td>
                   <td>${f.bps ? formatNumber(f.bps) : '-'}</td>
                   <td>${f.per ? f.per.toFixed(2) : '-'}</td>
