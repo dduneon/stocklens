@@ -102,15 +102,14 @@ def sync_tickers(date_str: str) -> int:
             tickers = krx_stock.get_market_ticker_list(market=market)
             # 섹터 정보
             try:
+                # 컬럼: 종목명, 업종명, 종가, 대비, 등락률, 시가총액  /  index: 종목코드
                 sectors_df = krx_stock.get_market_sector_classifications(date_str, market=market)
                 sector_map = {}
                 if not sectors_df.empty:
-                    sectors_df.index.name = "ticker"
-                    sectors_df.reset_index(inplace=True)
-                    for _, row in sectors_df.iterrows():
-                        sector_map[str(row.iloc[0])] = {
-                            "sector": str(row.iloc[1]) if len(row) > 1 else None,
-                            "industry": str(row.iloc[2]) if len(row) > 2 else None,
+                    for ticker_code, row in sectors_df.iterrows():
+                        sector_map[str(ticker_code)] = {
+                            "sector": str(row.get("업종명", "")) or None,
+                            "industry": None,
                         }
             except Exception:
                 sector_map = {}
@@ -140,6 +139,8 @@ def sync_tickers(date_str: str) -> int:
 
 
 # ── 2. OHLCV 수집 ──────────────────────────────────────────────────────────
+# pykrx get_market_ohlcv 컬럼: 시가, 고가, 저가, 종가, 거래량, 거래대금, 등락률, 시가총액
+# index: 티커
 
 def collect_ohlcv(date_str: str) -> int:
     log_id = _log_start("collect_ohlcv")
@@ -153,19 +154,17 @@ def collect_ohlcv(date_str: str) -> int:
                     continue
                 df.index.name = "ticker"
                 df.reset_index(inplace=True)
-                cols = list(df.columns)
-                # 컬럼명 정규화: 티커, 시가, 고가, 저가, 종가, 거래량, 거래대금, 등락률
                 for _, row in df.iterrows():
                     rows.append({
-                        "ticker": str(row.iloc[0]),
+                        "ticker": str(row["ticker"]),
                         "date": date_str,
-                        "open": _safe_int(row.iloc[1]),
-                        "high": _safe_int(row.iloc[2]),
-                        "low": _safe_int(row.iloc[3]),
-                        "close": _safe_int(row.iloc[4]),
-                        "volume": _safe_int(row.iloc[5]),
-                        "trading_value": _safe_int(row.iloc[6]) if len(row) > 6 else None,
-                        "change_pct": _safe_float(row.iloc[7]) if len(row) > 7 else None,
+                        "open": _safe_int(row.get("시가")),
+                        "high": _safe_int(row.get("고가")),
+                        "low": _safe_int(row.get("저가")),
+                        "close": _safe_int(row.get("종가")),
+                        "volume": _safe_int(row.get("거래량")),
+                        "trading_value": _safe_int(row.get("거래대금")),
+                        "change_pct": _safe_float(row.get("등락률")),
                     })
             except Exception as e:
                 logger.warning("OHLCV 수집 실패 (%s): %s", market, e)
@@ -182,6 +181,8 @@ def collect_ohlcv(date_str: str) -> int:
 
 
 # ── 3. 펀더멘털 수집 ────────────────────────────────────────────────────────
+# pykrx get_market_fundamental 컬럼: BPS, PER, PBR, EPS, DIV, DPS
+# index: 티커
 
 def collect_fundamentals(date_str: str) -> int:
     log_id = _log_start("collect_fundamentals")
@@ -193,18 +194,17 @@ def collect_fundamentals(date_str: str) -> int:
             return 0
         df.index.name = "ticker"
         df.reset_index(inplace=True)
-        # 컬럼: ticker, BPS, PER, PBR, EPS, DIV, DPS
         rows = []
         for _, row in df.iterrows():
             rows.append({
-                "ticker": str(row.iloc[0]),
+                "ticker": str(row["ticker"]),
                 "date": date_str,
-                "bps": _safe_int(row.get("BPS", row.iloc[1] if len(row) > 1 else None)),
-                "per": _safe_float(row.get("PER", row.iloc[2] if len(row) > 2 else None)),
-                "pbr": _safe_float(row.get("PBR", row.iloc[3] if len(row) > 3 else None)),
-                "eps": _safe_int(row.get("EPS", row.iloc[4] if len(row) > 4 else None)),
-                "div": _safe_float(row.get("DIV", row.iloc[5] if len(row) > 5 else None)),
-                "dps": _safe_int(row.get("DPS", row.iloc[6] if len(row) > 6 else None)),
+                "bps": _safe_int(row.get("BPS")),
+                "per": _safe_float(row.get("PER")),
+                "pbr": _safe_float(row.get("PBR")),
+                "eps": _safe_int(row.get("EPS")),
+                "div": _safe_float(row.get("DIV")),
+                "dps": _safe_int(row.get("DPS")),
             })
 
         with get_session() as s:
@@ -218,6 +218,8 @@ def collect_fundamentals(date_str: str) -> int:
 
 
 # ── 4. 시가총액 수집 ────────────────────────────────────────────────────────
+# pykrx get_market_cap 컬럼: 종가, 시가총액, 거래량, 거래대금, 상장주식수
+# index: 티커
 
 def collect_market_cap(date_str: str) -> int:
     log_id = _log_start("collect_market_cap")
@@ -233,11 +235,11 @@ def collect_market_cap(date_str: str) -> int:
                 df.reset_index(inplace=True)
                 for _, row in df.iterrows():
                     rows.append({
-                        "ticker": str(row.iloc[0]),
+                        "ticker": str(row["ticker"]),
                         "date": date_str,
-                        "market_cap": _safe_int(row.iloc[1]),
-                        "trading_value": _safe_int(row.iloc[2]) if len(row) > 2 else None,
-                        "listed_shares": _safe_int(row.iloc[4]) if len(row) > 4 else None,
+                        "market_cap": _safe_int(row.get("시가총액")),
+                        "trading_value": _safe_int(row.get("거래대금")),
+                        "listed_shares": _safe_int(row.get("상장주식수")),
                     })
             except Exception as e:
                 logger.warning("시가총액 수집 실패 (%s): %s", market, e)
@@ -254,48 +256,53 @@ def collect_market_cap(date_str: str) -> int:
 
 
 # ── 5. 투자자별 수급 수집 ──────────────────────────────────────────────────
+# pykrx get_market_net_purchases_of_equities(fromdate, todate, market, investor)
+# 컬럼: 종목명, 매도거래량, 매수거래량, 순매수거래량, 매도거래대금, 매수거래대금, 순매수거래대금
+# index: 티커
+# investor: '개인' | '기관합계' | '외국인합계'
+
+_INVESTOR_MAP = [
+    ("개인",      "individual"),
+    ("기관합계",   "institutional"),
+    ("외국인합계", "foreign"),
+]
 
 def collect_investor_trading(date_str: str) -> int:
-    """전체 시장의 투자자별 순매수 상위 데이터 수집."""
     log_id = _log_start("collect_investor_trading")
     total = 0
     try:
-        rows = []
-        # 투자자 타입: 개인(1), 기관(2), 외국인(4)
-        # 시장 전체 순매수 종목 가져오기
+        merged: dict[str, dict] = {}
+
         for market in MARKETS:
-            for inv_code, inv_key in [("1", "individual"), ("2", "institutional"), ("4", "foreign")]:
+            for inv_label, inv_key in _INVESTOR_MAP:
                 try:
                     df = krx_stock.get_market_net_purchases_of_equities(
-                        date_str, date_str, inv_code, market=market
+                        date_str, date_str, market, inv_label
                     )
                     if df.empty:
                         continue
                     df.index.name = "ticker"
                     df.reset_index(inplace=True)
                     for _, row in df.iterrows():
-                        ticker = str(row.iloc[0])
-                        net_val = _safe_int(row.iloc[-1])  # 순매수 대금
-                        buy_val = _safe_int(row.iloc[2]) if len(row) > 2 else None
-                        sell_val = _safe_int(row.iloc[3]) if len(row) > 3 else None
-                        rows.append({
-                            "ticker": ticker,
-                            "date": date_str,
-                            f"{inv_key}_buy": buy_val,
-                            f"{inv_key}_sell": sell_val,
-                        })
+                        ticker = str(row["ticker"])
+                        key = ticker
+                        if key not in merged:
+                            merged[key] = {"ticker": ticker, "date": date_str}
+                        merged[key][f"{inv_key}_buy"]  = _safe_int(row.get("매수거래대금"))
+                        merged[key][f"{inv_key}_sell"] = _safe_int(row.get("매도거래대금"))
                 except Exception as e:
-                    logger.debug("투자자 수급 수집 실패 (%s %s): %s", market, inv_code, e)
+                    logger.debug("투자자 수급 수집 실패 (%s %s): %s", market, inv_label, e)
 
-        # ticker+date 기준으로 병합
-        merged: dict[tuple, dict] = {}
-        for r in rows:
-            key = (r["ticker"], r["date"])
-            if key not in merged:
-                merged[key] = {"ticker": r["ticker"], "date": r["date"]}
-            merged[key].update({k: v for k, v in r.items() if k not in ("ticker", "date")})
-
-        merged_rows = list(merged.values())
+        # 모든 컬럼이 반드시 존재하도록 기본값 채우기
+        _inv_cols = [
+            "individual_buy", "individual_sell",
+            "institutional_buy", "institutional_sell",
+            "foreign_buy", "foreign_sell",
+        ]
+        merged_rows = [
+            {**{c: None for c in _inv_cols}, **row}
+            for row in merged.values()
+        ]
         if merged_rows:
             with get_session() as s:
                 total = _upsert(s, DailyInvestorTrading, merged_rows, ["ticker", "date"])
