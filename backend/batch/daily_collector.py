@@ -15,13 +15,17 @@ from datetime import datetime, timezone
 # backend/ 경로 주입
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# pykrx 내부 logging 버그(TypeError: not all arguments converted) 무시
+# pykrx 내부 logging 버그 무시
+#   - TypeError: not all arguments converted during string formatting
+#   - ValueError: Length mismatch (주말/공휴일 빈 응답)
 class _PykrxLogFilter(logging.Filter):
+    _SUPPRESS = ("Length mismatch",)
+
     def filter(self, record):
         try:
-            record.getMessage()
-            return True
-        except TypeError:
+            msg = record.getMessage()
+            return not any(s in msg for s in self._SUPPRESS)
+        except (TypeError, ValueError):
             return False
 
 logging.root.addFilter(_PykrxLogFilter())
