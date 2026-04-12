@@ -1,19 +1,53 @@
 """섹터(업종) 분류 및 적정 배수 서비스.
 
-DART company API의 induty_code(KSIC 기반)를 사용해 종목 섹터를 파악하고
-섹터별 적정 PER/PBR 배수를 반환한다.
-
 우선순위:
-  KRX 실데이터(pykrx) → 과거 5년 평균 PER/PBR → 섹터 Fallback 테이블
-  현재 pykrx 인덱스 API 미동작으로 Fallback 테이블 우선 사용.
+  KRX get_market_sector_classifications (pykrx, 로그인 세션 필요)
+  → DART company API induty_code(KSIC 기반)
+  → Fallback 테이블
 """
 import logging
 import os
 import requests
+from pykrx import stock as krx_stock
 
 from cache.ttl_cache import cache
+from utils.date_utils import latest_trading_date
 
 logger = logging.getLogger(__name__)
+
+# ── KRX 업종명 → 섹터 매핑 ─────────────────────────────────────────────────
+
+_KRX_업종_TO_SECTOR: dict[str, str] = {
+    "전기·전자":       "반도체",
+    "IT 서비스":       "IT·소프트웨어",
+    "출판·매체복제":   "IT·소프트웨어",
+    "운송장비·부품":   "자동차",
+    "은행":            "금융·은행",
+    "기타금융":        "금융·은행",
+    "보험":            "금융·은행",
+    "증권":            "금융·은행",
+    "금융":            "금융·은행",
+    "제약":            "바이오·제약",
+    "의료·정밀기기":   "바이오·제약",
+    "통신":            "통신",
+    "화학":            "에너지·화학",
+    "전기·가스":       "에너지·화학",
+    "전기·가스·수도":  "에너지·화학",
+    "금속":            "소재·철강",
+    "비금속":          "소재·철강",
+    "종이·목재":       "소재·철강",
+    "건설":            "건설·부동산",
+    "부동산":          "건설·부동산",
+    "유통":            "유통·소비재",
+    "음식료·담배":     "유통·소비재",
+    "섬유·의류":       "유통·소비재",
+    "기계·장비":       "기타",
+    "오락·문화":       "기타",
+    "운송·창고":       "기타",
+    "일반서비스":      "기타",
+    "기타제조":        "기타",
+    "농업 임업 및 어업": "기타",
+}
 
 DART_BASE = "https://opendart.fss.or.kr/api"
 
@@ -128,13 +162,46 @@ def _induty_to_sector(code: str | int | None) -> str:
     return "기타"
 
 
+# ── KRX 전체 섹터맵 (일별 캐시) ──────────────────────────────────────────
+
+def _load_krx_sector_map() -> dict[str, str]:
+    """KRX get_market_sector_classifications로 {ticker: 업종명} 맵 반환.
+
+    하루 1번만 조회 후 캐시.
+    """
+    date = latest_trading_date()
+    cache_key = f"krx_sector_map:{date}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    sector_map: dict[str, str] = {}
+    try:
+        for market in ("KOSPI", "KOSDAQ"):
+            df = krx_stock.get_market_sector_classifications(date, market=market)
+            if df.empty:
+                continue
+            for ticker_code, row in df.iterrows():
+                업종명 = str(row.get("업종명", "")).strip()
+                sector_map[str(ticker_code)] = 업종명
+        cache.set(cache_key, sector_map, ttl=86400)   # 24h 캐시
+        logger.info("KRX 섹터맵 로드 완료: %d 종목", len(sector_map))
+    except Exception as e:
+        logger.warning("KRX 섹터맵 로드 실패: %s", e)
+
+    return sector_map
+
+
 # ── 종목 섹터 조회 ─────────────────────────────────────────────────────────
 
 _SECTOR_CACHE: dict[str, str] = {}   # ticker → sector (메모리 캐시)
 
 
 def get_ticker_sector(ticker: str) -> str:
-    """DART company API로 종목 섹터 반환. 실패 시 '기타'."""
+    """종목 섹터 반환.
+
+    우선순위: KRX 업종명 → DART induty_code → '기타'
+    """
     if ticker in _SECTOR_CACHE:
         return _SECTOR_CACHE[ticker]
 
@@ -145,6 +212,20 @@ def get_ticker_sector(ticker: str) -> str:
         return cached
 
     sector = "기타"
+
+    # 1순위: KRX 업종 분류
+    try:
+        krx_map = _load_krx_sector_map()
+        업종명 = krx_map.get(ticker, "")
+        if 업종명:
+            sector = _KRX_업종_TO_SECTOR.get(업종명, "기타")
+            _SECTOR_CACHE[ticker] = sector
+            cache.set(cache_key, sector, ttl=86400 * 30)
+            return sector
+    except Exception as e:
+        logger.debug("KRX 섹터 조회 실패 (%s): %s", ticker, e)
+
+    # 2순위: DART induty_code
     try:
         from services.disclosure_service import _get_corp_map
         corp_map  = _get_corp_map()
@@ -161,10 +242,10 @@ def get_ticker_sector(ticker: str) -> str:
             if d.get("status") == "000":
                 sector = _induty_to_sector(d.get("induty_code"))
     except Exception as e:
-        logger.debug("섹터 조회 실패 (%s): %s", ticker, e)
+        logger.debug("DART 섹터 조회 실패 (%s): %s", ticker, e)
 
     _SECTOR_CACHE[ticker] = sector
-    cache.set(cache_key, sector, ttl=86400 * 30)   # 30일 캐시
+    cache.set(cache_key, sector, ttl=86400 * 30)
     return sector
 
 
@@ -180,5 +261,5 @@ def get_sector_multiples(ticker: str) -> dict:
         "sector": sector,
         "per":    mult["per"],
         "pbr":    mult["pbr"],
-        "source": "fallback",   # KRX 실데이터 복구 시 "krx"로 변경
+        "source": "krx",
     }
