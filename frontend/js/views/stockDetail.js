@@ -263,14 +263,20 @@ function renderAnalysis(section, d) {
 
           <!-- 목표가 -->
           <div style="background:var(--color-surface);border-radius:var(--radius-md);padding:var(--space-4)">
-            <div style="font-size:var(--text-sm);font-weight:var(--font-semibold);margin-bottom:var(--space-3)">목표가 추정</div>
-            ${targetRow('PER 기반',        tp.per_based)}
-            ${targetRow('PBR 기반',        tp.pbr_based)}
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)">
+              <span style="font-size:var(--text-sm);font-weight:var(--font-semibold)">목표가 추정</span>
+              ${tp.sector ? `<span style="font-size:10px;color:var(--color-text-tertiary);background:var(--color-border-light);padding:2px 6px;border-radius:var(--radius-sm)">${tp.sector} · PER ${tp.sector_per}배</span>` : ''}
+            </div>
+            ${targetRow(`PER 기반 (${tp.sector_per ?? 15}배)`,        tp.per_based)}
+            ${targetRow(`PBR 기반 (${tp.sector_pbr ?? 1.0}배)`,       tp.pbr_based)}
             ${targetRow('Forward PER 기반', tp.forward_per_based)}
-            ${targetRow('52주 중간값',     tp.week52_mid)}
+            ${targetRow('52주 가중평균',    tp.week52_mid)}
             <div style="border-top:1px solid var(--color-border);margin:var(--space-3) 0"></div>
             <div style="display:flex;justify-content:space-between;align-items:center">
-              <span style="font-size:var(--text-sm);font-weight:var(--font-bold)">컨센서스</span>
+              <div>
+                <span style="font-size:var(--text-sm);font-weight:var(--font-bold)">컨센서스</span>
+                <div style="font-size:9px;color:var(--color-text-tertiary);margin-top:1px">Forward 35% · PER 30% · 52주 20% · PBR 15%</div>
+              </div>
               <div style="text-align:right">
                 <div style="font-size:var(--text-base);font-weight:var(--font-bold);color:var(--color-brand)">
                   ${tp.consensus ? formatNumber(tp.consensus) + '원' : '-'}
@@ -291,11 +297,13 @@ function renderAnalysis(section, d) {
                 </div>
                 ${fpe.eps_growth_rate != null ? `
                   <div style="display:flex;justify-content:space-between;font-size:var(--text-xs);color:var(--color-text-tertiary);margin-top:2px">
-                    <span>EPS 성장률(추정)</span>
+                    <span>EPS 성장률 (${fpe.growth_method ?? '추정'})</span>
                     <span style="color:${fpe.eps_growth_rate >= 0 ? 'var(--color-up)' : 'var(--color-down)'}">
                       ${fpe.eps_growth_rate >= 0 ? '+' : ''}${fpe.eps_growth_rate.toFixed(1)}%
                     </span>
                   </div>` : ''}
+                ${fpe.base_period ? `
+                  <div style="font-size:9px;color:var(--color-text-tertiary);margin-top:4px;text-align:right">기준: ${fpe.base_period} · 과거 실적 기반 추정</div>` : ''}
               </div>` : ''}
           </div>
 

@@ -23,6 +23,7 @@ from services.recommendation_service import score_ticker
 from services.shorting_service import get_shorting_summary
 from services.disclosure_service import get_disclosures
 from services.ecos_service import get_latest_macro
+from services.sector_service import get_sector_multiples
 
 logger = logging.getLogger(__name__)
 
@@ -69,53 +70,85 @@ def _safe_pct(num, den) -> float | None:
 
 # ── 목표가 계산 ───────────────────────────────────────────────────────────
 
-def _calculate_target_price(prices: list[float], fund: dict,
+def _calculate_target_price(ticker: str, prices: list[float], fund: dict,
                              financials: list[dict]) -> dict:
+    """섹터별 적정 배수 + 가중 컨센서스 기반 목표가 산출.
+
+    ① PER 기반   : EPS × 섹터 적정 PER
+    ② PBR 기반   : BPS × 섹터 적정 PBR
+    ③ Forward PER: Forward EPS × 섹터 적정 PER
+    ④ 52주 기반  : 고가×0.7 + 저가×0.3 (이상치 보정 포함)
+
+    컨센서스 가중치: Forward PER 35% · PER 30% · 52주 20% · PBR 15%
+    """
     current = prices[-1] if prices else None
     if not current:
         return {}
 
+    eps = fund.get("eps")
+    bps = fund.get("bps")
+
+    # 섹터 적정 배수
+    sect       = get_sector_multiples(ticker)
+    fair_per   = sect["per"]
+    fair_pbr   = sect["pbr"]
+    sector     = sect["sector"]
+    sect_src   = sect["source"]
+
     targets = {}
 
-    per   = fund.get("per")
-    pbr   = fund.get("pbr")
-    eps   = fund.get("eps")
-    bps   = fund.get("bps")
-
-    # ① PER 기반: EPS × 적정 PER(15 — 한국 시장 장기 평균)
+    # ① PER 기반
     if eps and eps > 0:
-        fair_per = 15.0
         targets["per_based"] = round(eps * fair_per, 0)
 
-    # ② PBR 기반: BPS × 1.0 (청산가치 = 최소 목표가)
+    # ② PBR 기반
     if bps and bps > 0:
-        targets["pbr_based"] = round(bps * 1.0, 0)
+        targets["pbr_based"] = round(bps * fair_pbr, 0)
 
-    # ③ Forward P/E 기반
+    # ③ Forward PER 기반
     fwd_pe = _calculate_forward_pe(current, fund, financials)
     if fwd_pe.get("forward_eps") and fwd_pe["forward_eps"] > 0:
-        targets["forward_per_based"] = round(fwd_pe["forward_eps"] * 15.0, 0)
+        targets["forward_per_based"] = round(fwd_pe["forward_eps"] * fair_per, 0)
 
-    # ④ 52주 기반: (52주 고가 + 저가) / 2
+    # ④ 52주 가중 평균 (고가 70% : 저가 30%)
     if len(prices) >= 60:
         window = prices[-min(len(prices), 252):]
-        hi52 = max(window)
-        lo52 = min(window)
-        targets["week52_mid"] = round((hi52 + lo52) / 2, 0)
+        hi52   = max(window)
+        lo52   = min(window)
+        # 이상치 보정: 저가가 고가 대비 -50% 이하인 경우 비중 15%로 축소
+        lo_weight = 0.15 if lo52 < hi52 * 0.5 else 0.30
+        hi_weight = 1.0 - lo_weight
+        targets["week52_mid"] = round(hi52 * hi_weight + lo52 * lo_weight, 0)
 
     if not targets:
-        return {"current": current}
+        return {"current": current, "sector": sector}
 
-    # 컨센서스: 유효한 목표가들의 평균
-    valid = [v for v in targets.values() if v and v > 0]
-    consensus = round(float(np.mean(valid)), 0) if valid else None
-    upside    = _safe_pct(consensus - current, current) if consensus else None
+    # 가중 컨센서스 (없는 항목은 제외하고 비중 재정규화)
+    WEIGHTS = {
+        "forward_per_based": 0.35,
+        "per_based":         0.30,
+        "week52_mid":        0.20,
+        "pbr_based":         0.15,
+    }
+    total_w = sum(WEIGHTS[k] for k in WEIGHTS if k in targets)
+    if total_w > 0:
+        consensus = round(
+            sum(targets[k] * WEIGHTS[k] for k in WEIGHTS if k in targets) / total_w, 0
+        )
+    else:
+        consensus = None
+
+    upside = _safe_pct(consensus - current, current) if consensus else None
 
     return {
-        "current":            current,
+        "current":           current,
+        "sector":            sector,
+        "sector_per":        fair_per,
+        "sector_pbr":        fair_pbr,
+        "sector_src":        sect_src,
         **targets,
-        "consensus":          consensus,
-        "upside_pct":         upside,
+        "consensus":         consensus,
+        "upside_pct":        upside,
     }
 
 
@@ -125,43 +158,62 @@ def _calculate_forward_pe(current_price: float, fund: dict,
                            financials: list[dict]) -> dict:
     """예상 EPS 기반 Forward P/E 계산.
 
-    연간 재무제표(A)에서 최신 2개년 순이익 YoY 성장률을 구해
-    forward EPS = 최신 EPS × (1 + 성장률) 로 추정.
+    성장률 산출 우선순위:
+      1) 3개년 순이익 CAGR  (연간 데이터 3개 이상일 때)
+      2) 최근 2개년 YoY     (연간 데이터 2개일 때)
+      3) 기본 5% 성장 가정  (데이터 부족)
 
-    한계: 애널리스트 컨센서스(Fnguide 등)의 Forward EPS와 다를 수 있음.
-    특히 실적 턴어라운드 종목(삼성전자 등)은 과거 YoY 방식이 미래를 크게 과소평가함.
+    Forward EPS = 현재 EPS × (1 + 성장률)
+    Forward P/E = 현재가 / Forward EPS
     """
     eps = fund.get("eps")
     per = fund.get("per")
 
-    # 연간 재무제표만, 최신순 정렬, 순이익이 있는 것만
+    # 연간 재무제표, 오름차순 정렬, 순이익 있는 것만
     annuals = sorted(
         [f for f in financials
          if f.get("period_type") == "A" and f.get("net_income")],
         key=lambda x: x.get("period", ""),
-        reverse=True,
     )
 
     growth_rate = None
-    latest_ni   = None
     base_period = None
+    growth_method = "기본값"
 
-    if len(annuals) >= 2:
-        ni_cur  = annuals[0].get("net_income")
-        ni_prev = annuals[1].get("net_income")
-        latest_ni   = ni_cur
-        base_period = annuals[0].get("period", "")
-        if ni_cur and ni_prev and ni_prev != 0:
-            growth_rate = (ni_cur - ni_prev) / abs(ni_prev)
-            growth_rate = max(-0.5, min(growth_rate, 2.0))  # -50% ~ +200% 클램프
+    if len(annuals) >= 3:
+        # 3개년 CAGR: (최신 / 3년 전) ^ (1/n) - 1
+        ni_latest = annuals[-1].get("net_income")
+        ni_oldest = annuals[-3].get("net_income")
+        base_period = annuals[-1].get("period", "")
+        if ni_latest and ni_oldest and ni_oldest > 0:
+            n = len(annuals) - 1   # 실제 연수
+            cagr = (ni_latest / ni_oldest) ** (1 / max(n, 1)) - 1
+            growth_rate = max(-0.5, min(cagr, 2.0))
+            growth_method = f"{n}년 CAGR"
+        elif ni_latest and ni_oldest and ni_oldest < 0 and ni_latest > 0:
+            # 적자→흑자 턴어라운드: YoY 로 fallback
+            ni_prev = annuals[-2].get("net_income")
+            if ni_prev and ni_prev > 0:
+                growth_rate = max(-0.5, min((ni_latest - ni_prev) / ni_prev, 2.0))
+                growth_method = "YoY (적자전환 보정)"
+
+    elif len(annuals) == 2:
+        ni_cur  = annuals[-1].get("net_income")
+        ni_prev = annuals[-2].get("net_income")
+        base_period = annuals[-1].get("period", "")
+        if ni_cur and ni_prev and ni_prev != 0 and ni_prev > 0:
+            growth_rate = max(-0.5, min((ni_cur - ni_prev) / ni_prev, 2.0))
+            growth_method = "YoY"
+
     elif len(annuals) == 1:
-        latest_ni   = annuals[0].get("net_income")
-        base_period = annuals[0].get("period", "")
+        base_period = annuals[-1].get("period", "")
 
     forward_eps = None
     forward_pe  = None
     if eps and eps > 0:
-        rate = growth_rate if growth_rate is not None else 0.05  # 기본 5% 성장 가정
+        rate = growth_rate if growth_rate is not None else 0.05
+        if growth_rate is None:
+            growth_method = "기본 5% 가정"
         forward_eps = round(eps * (1 + rate), 0)
         if current_price and forward_eps > 0:
             forward_pe = round(current_price / forward_eps, 2)
@@ -171,12 +223,9 @@ def _calculate_forward_pe(current_price: float, fund: dict,
         "forward_eps":     forward_eps,
         "forward_pe":      forward_pe,
         "eps_growth_rate": round(growth_rate * 100, 1) if growth_rate is not None else None,
-        "base_period":     base_period,       # 성장률 계산 기준 연도 (ex: "2025A")
-        "data_note":       (
-            "과거 실적 기반 추정 (애널리스트 컨센서스와 차이 있을 수 있음)"
-            if growth_rate is not None else
-            "성장률 데이터 부족 — 기본 5% 가정 적용"
-        ),
+        "growth_method":   growth_method,
+        "base_period":     base_period,
+        "data_note":       "과거 실적 기반 추정 (애널리스트 컨센서스와 차이 있을 수 있음)",
     }
 
 
@@ -323,7 +372,7 @@ def get_stock_analysis(ticker: str) -> dict:
     scoring = score_ticker(ticker, fund, prices, volumes, financials, trading)
 
     # 목표가
-    target = _calculate_target_price(prices, fund, financials)
+    target = _calculate_target_price(ticker, prices, fund, financials)
 
     # Forward P/E
     fwd_pe = _calculate_forward_pe(current_price, fund, financials)
