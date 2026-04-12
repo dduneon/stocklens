@@ -507,6 +507,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="StockLens 일별 배치 수집기")
     parser.add_argument("--schedule", action="store_true", help="스케줄러 모드 (daemon)")
     parser.add_argument("--backfill", type=int, metavar="DAYS", help="과거 N일 데이터 적재")
+    parser.add_argument("--workers", type=int, default=4, metavar="N", help="backfill 병렬 스레드 수 (기본 4)")
     parser.add_argument("--date", type=str, help="특정 날짜 수집 (YYYYMMDD)")
     args = parser.parse_args()
 
@@ -521,7 +522,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if args.backfill:
-        run_backfill(args.backfill)
+        run_backfill(args.backfill, workers=args.workers)
     elif args.schedule:
         run_scheduler()
     else:
