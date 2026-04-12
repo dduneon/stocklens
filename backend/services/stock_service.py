@@ -227,7 +227,7 @@ def get_market_cap_snapshot(date: str | None = None, market: str = "KOSPI") -> l
             return []
         df.index.name = "ticker"
         df.reset_index(inplace=True)
-        df.columns = ["ticker", "market_cap", "volume", "trading_value", "listed_shares"]
+        df.columns = ["ticker", "close", "market_cap", "volume", "trading_value", "listed_shares"]
         records = df_to_records(df)
         cache.set(cache_key, records, ttl=Config.CACHE_TTL_MARKET)
         return records
