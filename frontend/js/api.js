@@ -30,14 +30,19 @@ async function apiFetch(path, params = {}) {
 
 export const api = {
   market: {
-    summary: (market = 'KOSPI') => apiFetch('/market/summary', { market }),
+    summary:    (market = 'KOSPI') => apiFetch('/market/summary', { market }),
     indexChart: (market = 'KOSPI', days = 90) => apiFetch('/market/index-chart', { market, days }),
   },
   stocks: {
-    list: (params = {}) => apiFetch('/stocks/', params),
-    detail: (ticker) => apiFetch(`/stocks/${ticker}`),
-    ohlcv: (ticker, params = {}) => apiFetch(`/stocks/${ticker}/ohlcv`, params),
+    list:         (params = {}) => apiFetch('/stocks/', params),
+    detail:       (ticker) => apiFetch(`/stocks/${ticker}`),
+    ohlcv:        (ticker, params = {}) => apiFetch(`/stocks/${ticker}/ohlcv`, params),
     fundamentals: (ticker, params = {}) => apiFetch(`/stocks/${ticker}/fundamentals`, params),
+  },
+  analysis: {
+    stock:       (ticker) => apiFetch(`/analysis/stocks/${ticker}`),
+    indicators:  (days = 365) => apiFetch('/analysis/market/indicators', { days }),
+    shorting:    (market = 'KOSPI', top_n = 20) => apiFetch('/analysis/market/shorting', { market, top_n }),
   },
   recommendations: {
     list: (market = 'KOSPI', top_n = 20) => apiFetch('/recommendations/', { market, top_n }),

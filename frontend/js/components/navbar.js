@@ -16,6 +16,7 @@ export function renderNavbar() {
       <a href="#/" class="navbar__link" data-route="dashboard">대시보드</a>
       <a href="#/stocks" class="navbar__link" data-route="stocks">종목 탐색</a>
       <a href="#/recommendations" class="navbar__link" data-route="recommendations">추천 종목</a>
+      <a href="#/market-indicators" class="navbar__link" data-route="market-indicators">시장지표</a>
     </div>
     <div class="navbar__status">
       <span class="session-dot" id="sessionDot"></span>
