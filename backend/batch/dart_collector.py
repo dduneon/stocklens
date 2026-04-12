@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config import Config
 from db.engine import get_session
 from db.models import FinancialStatement, BatchLog
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 logger = logging.getLogger("batch.dart")
 
@@ -247,15 +247,13 @@ def run_dart_batch(year: int, quarter: int | None = None, annual: bool = False) 
 
     if rows:
         with get_session() as s:
-            stmt = pg_insert(FinancialStatement.__table__).values(rows)
+            stmt = mysql_insert(FinancialStatement.__table__).values(rows)
             update_cols = {
-                c.name: stmt.excluded[c.name]
+                c.name: stmt.inserted[c.name]
                 for c in FinancialStatement.__table__.columns
                 if c.name not in ("ticker", "period")
             }
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["ticker", "period"], set_=update_cols
-            )
+            stmt = stmt.on_duplicate_key_update(**update_cols)
             result = s.execute(stmt)
             logger.info("재무제표 upserted: %d rows (실패: %d)", result.rowcount, failed)
     else:

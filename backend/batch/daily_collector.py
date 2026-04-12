@@ -31,7 +31,7 @@ class _PykrxLogFilter(logging.Filter):
 logging.root.addFilter(_PykrxLogFilter())
 
 from pykrx import stock as krx_stock
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from config import Config
 from krx_session.manager import login_krx, is_logged_in
@@ -106,13 +106,13 @@ def _upsert(session, model, rows: list[dict], conflict_cols: list[str]) -> int:
         rows = _filter_by_ticker(rows)
     if not rows:
         return 0
-    stmt = pg_insert(model.__table__).values(rows)
+    stmt = mysql_insert(model.__table__).values(rows)
     update_cols = {
-        c.name: stmt.excluded[c.name]
+        c.name: stmt.inserted[c.name]
         for c in model.__table__.columns
         if c.name not in conflict_cols
     }
-    stmt = stmt.on_conflict_do_update(index_elements=conflict_cols, set_=update_cols)
+    stmt = stmt.on_duplicate_key_update(**update_cols)
     result = session.execute(stmt)
     return result.rowcount
 

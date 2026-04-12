@@ -206,7 +206,7 @@ def save_disclosures_to_db(ticker: str, days: int = 90) -> int:
 
     from db.engine import get_session
     from db.models import DartDisclosure
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.mysql import insert as mysql_insert
     from datetime import datetime
 
     db_rows = []
@@ -227,13 +227,10 @@ def save_disclosures_to_db(ticker: str, days: int = 90) -> int:
         return 0
 
     with get_session() as s:
-        stmt = pg_insert(DartDisclosure.__table__).values(db_rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["rcept_no"],
-            set_={
-                "title":    stmt.excluded.title,
-                "category": stmt.excluded.category,
-            },
+        stmt = mysql_insert(DartDisclosure.__table__).values(db_rows)
+        stmt = stmt.on_duplicate_key_update(
+            title=stmt.inserted.title,
+            category=stmt.inserted.category,
         )
         result = s.execute(stmt)
     return result.rowcount

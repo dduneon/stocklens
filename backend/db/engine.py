@@ -9,7 +9,7 @@ load_dotenv()
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+psycopg2://stocklens:stocklens_pw@localhost:5432/stocklens",
+    "mysql+pymysql://stocklens:stocklens_pw@localhost:3306/stocklens",
 )
 
 engine = create_engine(

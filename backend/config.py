@@ -11,10 +11,10 @@ class Config:
     PORT: int = int(os.getenv("FLASK_PORT", "5001"))
     SECRET_KEY: str = os.getenv("SECRET_KEY", "stocklens-dev-secret")
 
-    # PostgreSQL
+    # MariaDB
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "postgresql+psycopg2://stocklens:stocklens_pw@localhost:5432/stocklens",
+        "mysql+pymysql://stocklens:stocklens_pw@localhost:3306/stocklens",
     )
 
     # DART 전자공시 API 키 (재무제표 수집용)

@@ -217,7 +217,7 @@ def save_shorting_to_db(ticker: str, from_date: str, to_date: str) -> int:
         return 0
     from db.engine import get_session
     from db.models import DailyShorting
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.mysql import insert as mysql_insert
     from datetime import datetime
 
     db_rows = []
@@ -233,12 +233,12 @@ def save_shorting_to_db(ticker: str, from_date: str, to_date: str) -> int:
         })
 
     with get_session() as s:
-        stmt = pg_insert(DailyShorting.__table__).values(db_rows)
+        stmt = mysql_insert(DailyShorting.__table__).values(db_rows)
         update_cols = {
-            c.name: stmt.excluded[c.name]
+            c.name: stmt.inserted[c.name]
             for c in DailyShorting.__table__.columns
             if c.name not in ("ticker", "date")
         }
-        stmt = stmt.on_conflict_do_update(index_elements=["ticker", "date"], set_=update_cols)
+        stmt = stmt.on_duplicate_key_update(**update_cols)
         result = s.execute(stmt)
     return result.rowcount

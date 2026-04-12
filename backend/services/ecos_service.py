@@ -111,7 +111,7 @@ def save_macro_to_db(days: int = 365) -> int:
     """ECOS 데이터를 DB에 저장. 배치 수집용."""
     from db.engine import get_session
     from db.models import MacroIndicator
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.mysql import insert as mysql_insert
 
     total = 0
     data = get_macro_indicators(days)
@@ -129,11 +129,8 @@ def save_macro_to_db(days: int = 365) -> int:
 
     if rows:
         with get_session() as s:
-            stmt = pg_insert(MacroIndicator.__table__).values(rows)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["indicator", "date"],
-                set_={"value": stmt.excluded.value},
-            )
+            stmt = mysql_insert(MacroIndicator.__table__).values(rows)
+            stmt = stmt.on_duplicate_key_update(value=stmt.inserted.value)
             result = s.execute(stmt)
             total = result.rowcount
 

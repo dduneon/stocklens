@@ -1,0 +1,13 @@
+services:
+  backend:
+    image: ghcr.io/dduneon/stocklens:latest
+    container_name: stocklens_backend
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    env_file:
+      - .env
+    environment:
+      FLASK_PORT: "5001"
+      # DATABASE_URL은 .env에서 설정 (미니PC의 MariaDB 주소)
+      # 예: mysql+pymysql://stocklens:PASSWORD@HOST:3306/stocklens
