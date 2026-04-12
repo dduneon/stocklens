@@ -100,7 +100,8 @@ class DartClient:
             "cash": None,
         }
 
-        ACCOUNT_MAP = {
+        # XBRL ID 기반 매핑 (우선순위 높음)
+        ID_MAP = {
             "ifrs-full_Revenue": "revenue",
             "ifrs-full_ProfitLossFromOperatingActivities": "operating_income",
             "ifrs-full_ProfitLoss": "net_income",
@@ -108,26 +109,55 @@ class DartClient:
             "ifrs-full_Equity": "total_equity",
             "ifrs-full_Liabilities": "total_debt",
             "ifrs-full_CashAndCashEquivalents": "cash",
-            # 한국 계정 과목명 폴백
-            "매출액": "revenue",
-            "영업이익": "operating_income",
-            "당기순이익": "net_income",
-            "자산총계": "total_assets",
-            "자본총계": "total_equity",
-            "부채총계": "total_debt",
-            "현금및현금성자산": "cash",
         }
+        # 계정과목명 기반 매핑 — 접두·접미어(손실/비용 등) 무시하고 핵심어로 매핑
+        # (keyword, field, must_start_with) — must_start_with=True면 nm이 keyword로 시작해야 함
+        NM_KEYWORDS = [
+            ("매출액",       "revenue",          True),
+            ("영업이익",      "operating_income", True),
+            ("당기순이익",    "net_income",       True),   # "당기순이익(손실)" 포함
+            ("자산총계",      "total_assets",     True),
+            ("자본총계",      "total_equity",     True),   # "부채와자본총계" 제외
+            ("부채총계",      "total_debt",       True),
+            ("현금및현금성자산", "cash",            True),
+        ]
 
         for item in items:
             account_id = item.get("account_id", "")
-            account_nm = item.get("account_nm", "")
-            key = ACCOUNT_MAP.get(account_id) or ACCOUNT_MAP.get(account_nm)
+            account_nm = item.get("account_nm", "").strip()
+
+            # XBRL ID 우선 매핑
+            key = ID_MAP.get(account_id)
+
+            # XBRL ID 없으면 계정과목명 키워드 매핑
+            if not key:
+                for keyword, field, must_start in NM_KEYWORDS:
+                    if must_start:
+                        if account_nm.startswith(keyword):
+                            key = field
+                            break
+                    else:
+                        if keyword in account_nm:
+                            key = field
+                            break
+
             if not key:
                 continue
-            # 당기 금액 우선 (thstrm_amount), 없으면 thstrm_add_amount
+
             raw = item.get("thstrm_amount") or item.get("thstrm_add_amount") or ""
             val = _parse_amount(raw)
-            if val is not None:
+
+            # 값이 없거나 0이면 스킵
+            if not val:
+                continue
+
+            existing = result.get(key)
+
+            # 이미 값이 있으면: 더 큰 절댓값을 선택 (연결 전체 > 지배주주 지분 > 비지배)
+            if existing is not None:
+                if abs(val) > abs(existing):
+                    result[key] = val
+            else:
                 result[key] = val
 
         return result

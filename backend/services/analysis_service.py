@@ -125,25 +125,38 @@ def _calculate_forward_pe(current_price: float, fund: dict,
                            financials: list[dict]) -> dict:
     """예상 EPS 기반 Forward P/E 계산.
 
-    예상 EPS = 현재 EPS × (1 + 최근 EPS 성장률)
-    성장률은 연간 재무제표 EPS 변화율 또는 fundamental 히스토리로 추정.
+    연간 재무제표(A)에서 최신 2개년 순이익 YoY 성장률을 구해
+    forward EPS = 최신 EPS × (1 + 성장률) 로 추정.
+
+    한계: 애널리스트 컨센서스(Fnguide 등)의 Forward EPS와 다를 수 있음.
+    특히 실적 턴어라운드 종목(삼성전자 등)은 과거 YoY 방식이 미래를 크게 과소평가함.
     """
     eps = fund.get("eps")
     per = fund.get("per")
 
+    # 연간 재무제표만, 최신순 정렬, 순이익이 있는 것만
     annuals = sorted(
-        [f for f in financials if f.get("period_type") == "A"],
+        [f for f in financials
+         if f.get("period_type") == "A" and f.get("net_income")],
         key=lambda x: x.get("period", ""),
         reverse=True,
     )
 
     growth_rate = None
+    latest_ni   = None
+    base_period = None
+
     if len(annuals) >= 2:
         ni_cur  = annuals[0].get("net_income")
         ni_prev = annuals[1].get("net_income")
+        latest_ni   = ni_cur
+        base_period = annuals[0].get("period", "")
         if ni_cur and ni_prev and ni_prev != 0:
             growth_rate = (ni_cur - ni_prev) / abs(ni_prev)
             growth_rate = max(-0.5, min(growth_rate, 2.0))  # -50% ~ +200% 클램프
+    elif len(annuals) == 1:
+        latest_ni   = annuals[0].get("net_income")
+        base_period = annuals[0].get("period", "")
 
     forward_eps = None
     forward_pe  = None
@@ -154,10 +167,16 @@ def _calculate_forward_pe(current_price: float, fund: dict,
             forward_pe = round(current_price / forward_eps, 2)
 
     return {
-        "current_per":   per,
-        "forward_eps":   forward_eps,
-        "forward_pe":    forward_pe,
+        "current_per":     per,
+        "forward_eps":     forward_eps,
+        "forward_pe":      forward_pe,
         "eps_growth_rate": round(growth_rate * 100, 1) if growth_rate is not None else None,
+        "base_period":     base_period,       # 성장률 계산 기준 연도 (ex: "2025A")
+        "data_note":       (
+            "과거 실적 기반 추정 (애널리스트 컨센서스와 차이 있을 수 있음)"
+            if growth_rate is not None else
+            "성장률 데이터 부족 — 기본 5% 가정 적용"
+        ),
     }
 
 
