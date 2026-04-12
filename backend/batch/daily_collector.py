@@ -300,31 +300,52 @@ _INVESTOR_MAP = [
     ("외국인합계", "foreign"),
 ]
 
+def _fetch_investor(date_str: str, market: str, inv_label: str, inv_key: str) -> dict[str, dict]:
+    """단일 (마켓 × 투자자) 조합 API 호출. {ticker: {buy, sell}} 반환."""
+    result = {}
+    try:
+        df = krx_stock.get_market_net_purchases_of_equities(
+            date_str, date_str, market, inv_label
+        )
+        if df.empty:
+            return result
+        df.index.name = "ticker"
+        df.reset_index(inplace=True)
+        for _, row in df.iterrows():
+            ticker = str(row["ticker"])
+            result[ticker] = {
+                f"{inv_key}_buy":  _safe_int(row.get("매수거래대금")),
+                f"{inv_key}_sell": _safe_int(row.get("매도거래대금")),
+            }
+    except Exception as e:
+        logger.debug("투자자 수급 수집 실패 (%s %s): %s", market, inv_label, e)
+    return result
+
+
 def collect_investor_trading(date_str: str) -> int:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     log_id = _log_start("collect_investor_trading")
     total = 0
     try:
-        merged: dict[str, dict] = {}
+        # 6개 (마켓 × 투자자) 조합을 동시에 호출
+        tasks = [
+            (market, inv_label, inv_key)
+            for market in MARKETS
+            for inv_label, inv_key in _INVESTOR_MAP
+        ]
 
-        for market in MARKETS:
-            for inv_label, inv_key in _INVESTOR_MAP:
-                try:
-                    df = krx_stock.get_market_net_purchases_of_equities(
-                        date_str, date_str, market, inv_label
-                    )
-                    if df.empty:
-                        continue
-                    df.index.name = "ticker"
-                    df.reset_index(inplace=True)
-                    for _, row in df.iterrows():
-                        ticker = str(row["ticker"])
-                        key = ticker
-                        if key not in merged:
-                            merged[key] = {"ticker": ticker, "date": date_str}
-                        merged[key][f"{inv_key}_buy"]  = _safe_int(row.get("매수거래대금"))
-                        merged[key][f"{inv_key}_sell"] = _safe_int(row.get("매도거래대금"))
-                except Exception as e:
-                    logger.debug("투자자 수급 수집 실패 (%s %s): %s", market, inv_label, e)
+        merged: dict[str, dict] = {}
+        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+            futures = {
+                executor.submit(_fetch_investor, date_str, market, inv_label, inv_key): inv_key
+                for market, inv_label, inv_key in tasks
+            }
+            for future in as_completed(futures):
+                for ticker, cols in future.result().items():
+                    if ticker not in merged:
+                        merged[ticker] = {"ticker": ticker, "date": date_str}
+                    merged[ticker].update(cols)
 
         # 모든 컬럼이 반드시 존재하도록 기본값 채우기
         _inv_cols = [
