@@ -5,6 +5,7 @@ import { priceBadgeHtml, formatNumber, formatPct } from '../components/priceTag.
 import { createCandlestickChart, updateCandlestickChart } from '../charts/candlestick.js';
 
 let _chart = null;
+let _finCharts = [];   // 실적 차트 인스턴스 목록
 let _ticker = null;
 let _ohlcvAll = [];
 
@@ -34,6 +35,8 @@ export const stockDetailView = {
   },
   unmount() {
     if (_chart) { _chart.destroy(); _chart = null; }
+    _finCharts.forEach(c => c.destroy());
+    _finCharts = [];
     _ohlcvAll = [];
   },
 };
@@ -51,11 +54,23 @@ async function loadDetail(root, ticker) {
     const priceByDate = Object.fromEntries(_ohlcvAll.map(d => [d.x, d.c]));
     renderDetail(root, ticker, detail, fundamentals.data || [], priceByDate);
 
-    // 분석 섹션은 별도로 비동기 로드 (느려도 메인 화면에 영향 없음)
+    // 실적·분석 섹션은 병렬로 비동기 로드
+    loadFinancials(ticker);
     loadAnalysis(ticker);
   } catch (err) {
     root.innerHTML = '';
     showError(root, `데이터 로드 실패: ${err.message}`);
+  }
+}
+
+async function loadFinancials(ticker) {
+  const section = document.getElementById('financialsSection');
+  if (!section) return;
+  try {
+    const res = await api.stocks.financials(ticker);
+    renderFinancials(section, res.data || []);
+  } catch (err) {
+    section.innerHTML = '';
   }
 }
 
@@ -128,6 +143,14 @@ function renderDetail(root, ticker, detail, fundamentals, priceByDate = {}) {
         <div class="chart-wrap" style="height:360px">
           <canvas id="candleChart"></canvas>
         </div>
+      </div>
+    </div>
+
+    <!-- 실적 (비동기 로드) -->
+    <div id="financialsSection" style="margin-bottom:var(--space-5)">
+      <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4);color:var(--color-text-tertiary)">
+        <div class="spinner" style="width:14px;height:14px;border-width:2px"></div>
+        <span style="font-size:var(--text-sm)">실적 데이터 로딩 중...</span>
       </div>
     </div>
 
@@ -431,4 +454,217 @@ function fundamentalItem(label, value) {
       <div class="fundamental-item__label">${label}</div>
       <div class="fundamental-item__value">${value}</div>
     </div>`;
+}
+
+// ── 실적 차트 ─────────────────────────────────────────────────────────────
+
+function renderFinancials(section, rawData) {
+  if (!rawData || !rawData.length) {
+    section.innerHTML = '';
+    return;
+  }
+
+  // 기간 오름차순 정렬
+  const data = [...rawData].sort((a, b) => (a.period > b.period ? 1 : -1));
+
+  // 레이블: "2023A" → "2023", "2024Q1" → "'24 Q1"
+  const labels = data.map(d => {
+    const p = d.period || '';
+    if (p.endsWith('A')) return p.slice(0, 4);
+    return `'${p.slice(2, 4)} ${p.slice(4)}`; // Q1/Q2 등
+  });
+
+  // 수치 변환 (조원, %)
+  const tri = v => (v != null ? +(v / 1e12).toFixed(2) : null);
+  const pct = (num, den) => (num != null && den ? +((num / den) * 100).toFixed(1) : null);
+
+  const revenue    = data.map(d => tri(d.revenue));
+  const opIncome   = data.map(d => tri(d.operating_income));
+  const netIncome  = data.map(d => tri(d.net_income));
+  const opMargin   = data.map(d => pct(d.operating_income, d.revenue));
+  const netMargin  = data.map(d => pct(d.net_income, d.revenue));
+  const roe        = data.map(d => pct(d.net_income, d.total_equity));
+  const debtRatio  = data.map(d => pct(d.total_debt, d.total_equity));
+
+  section.innerHTML = `
+    <h2 style="font-size:var(--text-base);font-weight:var(--font-bold);color:var(--color-text-primary);margin-bottom:var(--space-4)">실적</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);margin-bottom:var(--space-4)">
+      <div class="card card--shadow">
+        <div class="card__header"><span class="card__title">매출액 &amp; 영업이익률</span></div>
+        <div class="card__body"><div style="height:220px;position:relative"><canvas id="finChart1"></canvas></div></div>
+      </div>
+      <div class="card card--shadow">
+        <div class="card__header"><span class="card__title">영업이익 &amp; 순이익</span></div>
+        <div class="card__body"><div style="height:220px;position:relative"><canvas id="finChart2"></canvas></div></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)">
+      <div class="card card--shadow">
+        <div class="card__header"><span class="card__title">순이익률 &amp; 영업이익률</span></div>
+        <div class="card__body"><div style="height:220px;position:relative"><canvas id="finChart3"></canvas></div></div>
+      </div>
+      <div class="card card--shadow">
+        <div class="card__header"><span class="card__title">ROE &amp; 부채비율</span></div>
+        <div class="card__body"><div style="height:220px;position:relative"><canvas id="finChart4"></canvas></div></div>
+      </div>
+    </div>
+  `;
+
+  const BASE_OPTS = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'top', labels: { boxWidth: 10, font: { size: 11 } } },
+      tooltip: {
+        backgroundColor: '#fff',
+        borderColor: '#e5e8eb', borderWidth: 1,
+        titleColor: '#8b95a1', bodyColor: '#191f28',
+        titleFont: { size: 11 }, bodyFont: { size: 12, weight: '600' },
+        padding: 10,
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: '#8b95a1', font: { size: 11 } },
+      },
+    },
+  };
+
+  const yAxisLeft = (label, color) => ({
+    type: 'linear', position: 'left',
+    title: { display: true, text: label, color: '#8b95a1', font: { size: 10 } },
+    grid: { color: '#f2f4f6' },
+    ticks: { color: '#8b95a1', font: { size: 11 } },
+  });
+  const yAxisRight = (label) => ({
+    type: 'linear', position: 'right',
+    title: { display: true, text: label, color: '#8b95a1', font: { size: 10 } },
+    grid: { drawOnChartArea: false },
+    ticks: { color: '#8b95a1', font: { size: 11 },
+      callback: v => v + '%' },
+  });
+
+  // ① 매출액(막대) + 영업이익률(선)
+  _finCharts.push(new Chart(section.querySelector('#finChart1'), {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar', label: '매출액 (조원)', data: revenue,
+          backgroundColor: 'rgba(49,130,246,0.15)', borderColor: '#3182f6',
+          borderWidth: 1.5, borderRadius: 4, yAxisID: 'yLeft',
+        },
+        {
+          type: 'line', label: '영업이익률 (%)', data: opMargin,
+          borderColor: '#f59e0b', backgroundColor: 'transparent',
+          borderWidth: 2, pointRadius: 4, pointBackgroundColor: '#f59e0b',
+          tension: 0.3, yAxisID: 'yRight',
+        },
+      ],
+    },
+    options: {
+      ...BASE_OPTS,
+      scales: {
+        x: BASE_OPTS.scales.x,
+        yLeft:  yAxisLeft('조원', '#3182f6'),
+        yRight: yAxisRight('%'),
+      },
+    },
+  }));
+
+  // ② 영업이익(막대) + 순이익(막대)
+  _finCharts.push(new Chart(section.querySelector('#finChart2'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '영업이익 (조원)', data: opIncome,
+          backgroundColor: 'rgba(49,130,246,0.7)', borderRadius: 4,
+        },
+        {
+          label: '순이익 (조원)', data: netIncome,
+          backgroundColor: 'rgba(16,185,129,0.7)', borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      ...BASE_OPTS,
+      scales: {
+        x: BASE_OPTS.scales.x,
+        y: {
+          grid: { color: '#f2f4f6' },
+          ticks: { color: '#8b95a1', font: { size: 11 }, callback: v => v + '조' },
+        },
+      },
+    },
+  }));
+
+  // ③ 순이익률 & 영업이익률 (선)
+  _finCharts.push(new Chart(section.querySelector('#finChart3'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '영업이익률 (%)', data: opMargin,
+          borderColor: '#3182f6', backgroundColor: 'rgba(49,130,246,0.06)',
+          borderWidth: 2, pointRadius: 4, tension: 0.3, fill: true,
+        },
+        {
+          label: '순이익률 (%)', data: netMargin,
+          borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.06)',
+          borderWidth: 2, pointRadius: 4, tension: 0.3, fill: true,
+        },
+      ],
+    },
+    options: {
+      ...BASE_OPTS,
+      scales: {
+        x: BASE_OPTS.scales.x,
+        y: {
+          grid: { color: '#f2f4f6' },
+          ticks: { color: '#8b95a1', font: { size: 11 }, callback: v => v + '%' },
+        },
+      },
+    },
+  }));
+
+  // ④ ROE(선) + 부채비율(막대)
+  _finCharts.push(new Chart(section.querySelector('#finChart4'), {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar', label: '부채비율 (%)', data: debtRatio,
+          backgroundColor: 'rgba(239,68,68,0.15)', borderColor: '#ef4444',
+          borderWidth: 1.5, borderRadius: 4, yAxisID: 'yLeft',
+        },
+        {
+          type: 'line', label: 'ROE (%)', data: roe,
+          borderColor: '#8b5cf6', backgroundColor: 'transparent',
+          borderWidth: 2, pointRadius: 4, tension: 0.3, yAxisID: 'yRight',
+        },
+      ],
+    },
+    options: {
+      ...BASE_OPTS,
+      scales: {
+        x: BASE_OPTS.scales.x,
+        yLeft: {
+          type: 'linear', position: 'left',
+          title: { display: true, text: '부채비율 (%)', color: '#8b95a1', font: { size: 10 } },
+          grid: { color: '#f2f4f6' },
+          ticks: { color: '#8b95a1', font: { size: 11 }, callback: v => v + '%' },
+        },
+        yRight: {
+          type: 'linear', position: 'right',
+          title: { display: true, text: 'ROE (%)', color: '#8b95a1', font: { size: 10 } },
+          grid: { drawOnChartArea: false },
+          ticks: { color: '#8b95a1', font: { size: 11 }, callback: v => v + '%' },
+        },
+      },
+    },
+  }));
 }

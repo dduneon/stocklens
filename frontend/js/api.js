@@ -38,6 +38,7 @@ export const api = {
     detail:       (ticker) => apiFetch(`/stocks/${ticker}`),
     ohlcv:        (ticker, params = {}) => apiFetch(`/stocks/${ticker}/ohlcv`, params),
     fundamentals: (ticker, params = {}) => apiFetch(`/stocks/${ticker}/fundamentals`, params),
+    financials:   (ticker) => apiFetch(`/stocks/${ticker}/financials`),
   },
   analysis: {
     stock:       (ticker) => apiFetch(`/analysis/stocks/${ticker}`),
