@@ -289,7 +289,18 @@ function renderIndicatorChart(section) {
 // ─── Shorting Section ─────────────────────────────────────────────────────────
 
 function renderShortingSection(section, result) {
-  const { data = [] } = result || {};
+  const { data = [], available = true, reason = null } = result || {};
+
+  // 수집 불가 상태: 안내 메시지 표시
+  const unavailableHtml = !available
+    ? `<div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4) var(--space-5);background:var(--color-bg-secondary);border-radius:var(--radius-md);margin-bottom:var(--space-4)">
+        <span style="font-size:20px">⚠️</span>
+        <div>
+          <div style="font-size:var(--text-sm);font-weight:var(--font-semibold);color:var(--color-text-primary)">공매도 데이터 수집 불가</div>
+          <div style="font-size:var(--text-xs);color:var(--color-text-tertiary);margin-top:2px">${reason || 'KRX API 구조 변경으로 인해 일시적으로 수집이 중단되었습니다.'}</div>
+        </div>
+      </div>`
+    : '';
 
   const rowsHtml = data.length
     ? data.map((row, i) => `
@@ -304,10 +315,12 @@ function renderShortingSection(section, result) {
           <td style="text-align:right;font-variant-numeric:tabular-nums;color:var(--color-text-secondary)">${formatNumber(row.total_volume)}</td>
         </tr>
       `).join('')
-    : `<tr><td colspan="6" style="text-align:center;padding:var(--space-8);color:var(--color-text-tertiary);font-size:var(--text-sm)">데이터 없음</td></tr>`;
+    : `<tr><td colspan="6" style="text-align:center;padding:var(--space-8);color:var(--color-text-tertiary);font-size:var(--text-sm)">${!available ? '수집 불가' : '데이터 없음'}</td></tr>`;
 
   section.innerHTML = `
     <h2 style="font-size:var(--text-base);font-weight:var(--font-bold);color:var(--color-text-primary);margin-bottom:var(--space-4)">공매도 현황</h2>
+
+    ${unavailableHtml}
 
     <div class="card card--shadow">
       <div class="card__header" style="display:flex;align-items:center;justify-content:space-between">

@@ -36,7 +36,8 @@ def market_shorting():
     market = request.args.get("market", "KOSPI")
     top_n  = min(int(request.args.get("top_n", 20)), 50)
     try:
-        return jsonify({"market": market, "data": get_market_shorting_ranking(market, top_n)})
+        result = get_market_shorting_ranking(market, top_n)
+        return jsonify({"market": market, **result})
     except Exception as e:
         logger.exception("공매도 랭킹 조회 실패: %s", e)
         return jsonify({"error": str(e)}), 500

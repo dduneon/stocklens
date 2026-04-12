@@ -1,4 +1,10 @@
-"""pykrx 공매도 데이터 수집 서비스."""
+"""pykrx 공매도 데이터 수집 서비스.
+
+주의: pykrx 공매도 API는 KRX 웹사이트 구조 변경으로 인해
+      일부 함수가 정상 동작하지 않을 수 있음.
+      현재 KRX 공매도 데이터는 수집 불가 상태이며,
+      향후 pykrx 업데이트 또는 KRX OpenAPI 전환 시 복구 예정.
+"""
 import logging
 import numpy as np
 from pykrx import stock as krx_stock
@@ -6,6 +12,8 @@ from pykrx import stock as krx_stock
 from cache.ttl_cache import cache
 from config import Config
 from utils.date_utils import n_days_ago, latest_trading_date
+
+SHORTING_UNAVAILABLE = True   # pykrx KRX API 변경으로 공매도 데이터 수집 불가
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +89,10 @@ def _get_shorting_from_db(ticker: str, from_date: str, to_date: str) -> list[dic
 
 
 def _fetch_shorting_pykrx(ticker: str, from_date: str, to_date: str) -> list[dict]:
+    """pykrx로 공매도 데이터 수집 시도. KRX API 변경으로 현재 수집 불가."""
+    if SHORTING_UNAVAILABLE:
+        return []
+
     result = {}
     try:
         vol_df = krx_stock.get_shorting_volume_by_date(from_date, to_date, ticker)
@@ -151,8 +163,19 @@ def get_shorting_summary(ticker: str, days: int = 20) -> dict:
 
 # ── 시장 공매도 랭킹 ──────────────────────────────────────────────────────
 
-def get_market_shorting_ranking(market: str = "KOSPI", top_n: int = 20) -> list[dict]:
-    """시장 전체 공매도 비율 상위 종목 반환."""
+def get_market_shorting_ranking(market: str = "KOSPI", top_n: int = 20) -> dict:
+    """시장 전체 공매도 비율 상위 종목 반환.
+
+    Returns:
+        {"available": bool, "reason": str|None, "data": [...]}
+    """
+    if SHORTING_UNAVAILABLE:
+        return {
+            "available": False,
+            "reason": "KRX 공매도 API 구조 변경으로 수집 불가 (pykrx 업데이트 대기 중)",
+            "data": [],
+        }
+
     date = latest_trading_date()
     cache_key = f"shorting_ranking:{market}:{date}"
     cached = cache.get(cache_key)
@@ -160,13 +183,13 @@ def get_market_shorting_ranking(market: str = "KOSPI", top_n: int = 20) -> list[
         return cached
 
     try:
-        df = krx_stock.get_shorting_volume(date, market=market)
-        if df.empty:
-            return []
+        df = krx_stock.get_shorting_volume_by_ticker(date, market=market)
+        if df is None or df.empty:
+            return {"available": True, "reason": None, "data": []}
+
         df.index.name = "ticker"
         df.reset_index(inplace=True)
 
-        # 종목명 매핑
         from services.stock_service import get_ticker_name
         rows = []
         for _, row in df.iterrows():
@@ -181,11 +204,12 @@ def get_market_shorting_ranking(market: str = "KOSPI", top_n: int = 20) -> list[
             })
 
         rows = sorted(rows, key=lambda x: x["shorting_ratio"], reverse=True)[:top_n]
-        cache.set(cache_key, rows, ttl=Config.CACHE_TTL_MARKET)
-        return rows
+        result = {"available": True, "reason": None, "data": rows}
+        cache.set(cache_key, result, ttl=Config.CACHE_TTL_MARKET)
+        return result
     except Exception as e:
         logger.error("시장 공매도 랭킹 조회 실패: %s", e)
-        return []
+        return {"available": False, "reason": str(e), "data": []}
 
 
 # ── DB 저장 (배치용) ──────────────────────────────────────────────────────

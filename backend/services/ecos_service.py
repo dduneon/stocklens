@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 ECOS_BASE = "https://ecos.bok.or.kr/api/StatisticSearch"
 
 # 지표 정의: (stat_code, period_type, item_code, label)
+# ECOS API cycle: 일별=D, 월별=M, 분기별=Q, 연별=A  (DD/MM 은 잘못된 값)
 INDICATORS = {
-    "base_rate": ("722Y001", "DD", "0101000", "기준금리"),
-    "usd_krw":   ("731Y004", "DD", "0000001", "원/달러 환율"),
-    "cpi":       ("901Y009", "MM", "0",       "소비자물가지수"),
+    "base_rate": ("722Y001", "D", "0101000", "기준금리"),
+    "usd_krw":   ("731Y001", "D", "0000001", "원/달러 환율"),   # 731Y001=외국환율 일별
+    "cpi":       ("901Y009", "M", "0",       "소비자물가지수"),
 }
 
 
@@ -78,7 +79,7 @@ def get_macro_indicators(days: int = 365) -> dict:
     if cached is not None:
         return cached
 
-    # DD 형식은 YYYYMMDD, MM 형식은 YYYYMM
+    # D 형식은 YYYYMMDD, M 형식은 YYYYMM
     start_dd = n_days_ago(days)                    # YYYYMMDD
     end_dd   = today_str()
     start_mm = start_dd[:6]                        # YYYYMM
@@ -88,7 +89,7 @@ def get_macro_indicators(days: int = 365) -> dict:
     latest = {}
 
     for key, (stat_code, period_type, item_code, _label) in INDICATORS.items():
-        if period_type == "DD":
+        if period_type == "D":
             rows = _ecos_fetch(stat_code, period_type, item_code, start_dd, end_dd)
         else:
             rows = _ecos_fetch(stat_code, period_type, item_code, start_mm, end_mm)
