@@ -392,36 +392,75 @@ def run_historical_load(days: int = 365) -> None:
     logger.info("run_backfill(days=%d) 를 대신 사용하세요.", days)
 
 
-def run_backfill(days: int = 30) -> None:
-    """과거 N일치 데이터를 날짜별로 순차 적재."""
-    import time
-    from datetime import timedelta
+def _get_trading_dates(from_date: str, to_date: str) -> list[str]:
+    """실제 거래일 목록만 반환 (삼성전자 기준으로 비거래일 사전 제거)."""
+    try:
+        df = krx_stock.get_market_ohlcv(from_date, to_date, "005930")
+        if not df.empty:
+            return [d.strftime("%Y%m%d") for d in df.index]
+    except Exception as e:
+        logger.warning("거래일 캘린더 조회 실패, 전체 날짜 순회로 fallback: %s", e)
 
-    # tickers 테이블을 먼저 채워야 FK 위반이 안 남
+    # fallback: 전체 날짜 반환 (비거래일은 collect_ohlcv에서 걸러짐)
+    from datetime import timedelta
+    start = datetime.strptime(from_date, "%Y%m%d").date()
+    end   = datetime.strptime(to_date,   "%Y%m%d").date()
+    result, cur = [], start
+    while cur <= end:
+        result.append(cur.strftime("%Y%m%d"))
+        cur += timedelta(days=1)
+    return result
+
+
+def _backfill_one_date(date_str: str) -> bool:
+    """단일 날짜 backfill. 성공 여부 반환."""
+    try:
+        ohlcv_cnt = collect_ohlcv(date_str)
+        if ohlcv_cnt == 0:
+            return False  # 비거래일
+        collect_fundamentals(date_str)
+        collect_market_cap(date_str)
+        collect_investor_trading(date_str)
+        return True
+    except Exception as e:
+        logger.warning("backfill 실패 (%s): %s", date_str, e)
+        return False
+
+
+def run_backfill(days: int = 30, workers: int = 4) -> None:
+    """과거 N일치 데이터를 병렬로 빠르게 적재.
+
+    Args:
+        days:    소급 수집할 일수
+        workers: 병렬 스레드 수 (KRX 부하 고려, 기본 4)
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     logger.info("종목 목록 동기화 중...")
     sync_tickers(today_str())
 
-    start = datetime.strptime(n_days_ago(days), "%Y%m%d").date()
-    end = datetime.strptime(today_str(), "%Y%m%d").date()
+    from_date = n_days_ago(days)
+    to_date   = today_str()
 
-    current = start
-    while current <= end:
-        date_str = current.strftime("%Y%m%d")
-        logger.info("backfill: %s", date_str)
-        try:
-            ohlcv_cnt = collect_ohlcv(date_str)
-            if ohlcv_cnt == 0:
-                current += timedelta(days=1)
-                continue  # 비거래일이면 나머지 건너뜀
-            collect_fundamentals(date_str)
-            collect_market_cap(date_str)
-            collect_investor_trading(date_str)
-            time.sleep(0.5)  # KRX 서버 부하 방지
-        except Exception as e:
-            logger.warning("backfill 실패 (%s): %s", date_str, e)
-        current += timedelta(days=1)
+    logger.info("거래일 캘린더 조회 중 (%s ~ %s)...", from_date, to_date)
+    trading_dates = _get_trading_dates(from_date, to_date)
+    logger.info("실제 거래일 %d일 확인 → %d workers로 병렬 수집 시작",
+                len(trading_dates), workers)
 
-    logger.info("backfill 완료")
+    done, failed = 0, 0
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_backfill_one_date, d): d for d in trading_dates}
+        for future in as_completed(futures):
+            date_str = futures[future]
+            success = future.result()
+            if success:
+                done += 1
+                logger.info("✓ %s (%d/%d)", date_str, done + failed, len(trading_dates))
+            else:
+                failed += 1
+
+    logger.info("backfill 완료 — 성공: %d일, 건너뜀/실패: %d일", done, failed)
 
 
 # ── 스케줄러 ────────────────────────────────────────────────────────────────
