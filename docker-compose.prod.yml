@@ -9,7 +9,6 @@ services:
       - .env
     environment:
       FLASK_PORT: "5001"
-      DATABASE_URL: mysql+pymysql://stocklens:stocklens_pw@mariadb:3306/stocklens
     networks:
       - service-net
 
