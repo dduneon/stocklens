@@ -84,6 +84,39 @@ class FinancialStatement(Base):
     updated_at       = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
 
+class DailyShorting(Base):
+    """일별 공매도 데이터 (pykrx)."""
+    __tablename__ = "daily_shorting"
+
+    ticker          = Column(String(10), ForeignKey("tickers.ticker", ondelete="CASCADE"), primary_key=True)
+    date            = Column(Date, primary_key=True)
+    shorting_volume = Column(BigInteger)   # 공매도 거래량
+    total_volume    = Column(BigInteger)   # 전체 거래량
+    shorting_ratio  = Column(Numeric(8, 4))  # 공매도 비율 (%)
+    balance         = Column(BigInteger)   # 공매도 잔고 수량
+    balance_value   = Column(BigInteger)   # 잔고 금액
+
+
+class DartDisclosure(Base):
+    """DART 주요 공시 목록."""
+    __tablename__ = "dart_disclosure"
+
+    rcept_no     = Column(String(20), primary_key=True)   # 접수번호
+    ticker       = Column(String(10), ForeignKey("tickers.ticker", ondelete="CASCADE"), index=True)
+    disclosed_at = Column(Date, index=True)
+    title        = Column(String(300))
+    category     = Column(String(50))    # 공시 유형 코드
+
+
+class MacroIndicator(Base):
+    """ECOS 거시경제 지표."""
+    __tablename__ = "macro_indicator"
+
+    indicator = Column(String(50), primary_key=True)  # 'base_rate' | 'usd_krw' | 'cpi'
+    date      = Column(Date, primary_key=True)
+    value     = Column(Numeric(14, 4))
+
+
 class BatchLog(Base):
     __tablename__ = "batch_log"
 

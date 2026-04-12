@@ -30,10 +30,12 @@ def create_app() -> Flask:
     from api.market import market_bp
     from api.stocks import stocks_bp
     from api.recommendations import recommendations_bp
+    from api.analysis import analysis_bp
 
     app.register_blueprint(market_bp, url_prefix="/api/market")
     app.register_blueprint(stocks_bp, url_prefix="/api/stocks")
     app.register_blueprint(recommendations_bp, url_prefix="/api/recommendations")
+    app.register_blueprint(analysis_bp, url_prefix="/api/analysis")
 
     # ── 상태 엔드포인트 ───────────────────────────────────────────────
     @app.get("/api/session/status")
