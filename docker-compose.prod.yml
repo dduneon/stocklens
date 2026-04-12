@@ -9,5 +9,10 @@ services:
       - .env
     environment:
       FLASK_PORT: "5001"
-      # DATABASE_URL은 .env에서 설정 (미니PC의 MariaDB 주소)
-      # 예: mysql+pymysql://stocklens:PASSWORD@HOST:3306/stocklens
+      DATABASE_URL: mysql+pymysql://stocklens:stocklens_pw@mariadb:3306/stocklens
+    networks:
+      - service-net
+
+networks:
+  service-net:
+    external: true
