@@ -8,13 +8,21 @@ let _chart = null;
 let _indicatorData = null;
 let _activeIndicator = 'base_rate';
 let _shortingMarket = 'KOSPI';
+let _investorMarket = 'KOSPI';
+let _investorDays   = 1;
+let _sectorMarket   = 'KOSPI';
+let _sectorDays     = 5;
 let _rootEl = null;
 
 export const marketIndicatorsView = {
   mount(container) {
     _activeIndicator = 'base_rate';
-    _shortingMarket = 'KOSPI';
-    _indicatorData = null;
+    _shortingMarket  = 'KOSPI';
+    _investorMarket  = 'KOSPI';
+    _investorDays    = 1;
+    _sectorMarket    = 'KOSPI';
+    _sectorDays      = 5;
+    _indicatorData   = null;
 
     container.innerHTML = `<div class="page-content" id="mktIndRoot"></div>`;
     _rootEl = container.querySelector('#mktIndRoot');
@@ -32,35 +40,49 @@ export const marketIndicatorsView = {
 // ─── Shell ────────────────────────────────────────────────────────────────────
 
 function renderShell(root) {
+  const secStyle = 'margin-bottom:var(--space-10)';
+  const h2Style  = 'font-size:var(--text-base);font-weight:var(--font-bold);color:var(--color-text-primary);margin-bottom:var(--space-4)';
   root.innerHTML = `
     <div class="page-header">
       <div>
         <h1 class="page-title">시장지표</h1>
-        <p class="page-subtitle">거시경제 및 공매도 현황</p>
+        <p class="page-subtitle">거시경제 · 투자자 수급 · 섹터 현황</p>
       </div>
     </div>
 
     <!-- 거시경제 지표 -->
-    <section id="macroSection" style="margin-bottom:var(--space-8)">
-      <h2 style="font-size:var(--text-base);font-weight:var(--font-bold);color:var(--color-text-primary);margin-bottom:var(--space-4)">거시경제 지표</h2>
+    <section id="macroSection" style="${secStyle}">
+      <h2 style="${h2Style}">거시경제 지표</h2>
       <div id="macroLoader"></div>
     </section>
 
+    <!-- 투자자별 수급 -->
+    <section id="investorSection" style="${secStyle}">
+      <h2 style="${h2Style}">투자자별 수급</h2>
+      <div id="investorLoader"></div>
+    </section>
+
+    <!-- 섹터 핫 -->
+    <section id="sectorHeatSection" style="${secStyle}">
+      <h2 style="${h2Style}">섹터 동향</h2>
+      <div id="sectorHeatLoader"></div>
+    </section>
+
     <!-- 공매도 현황 -->
-    <section id="shortingSection">
-      <h2 style="font-size:var(--text-base);font-weight:var(--font-bold);color:var(--color-text-primary);margin-bottom:var(--space-4)">공매도 현황</h2>
+    <section id="shortingSection" style="${secStyle}">
+      <h2 style="${h2Style}">공매도 현황</h2>
       <div id="shortingLoader"></div>
     </section>
   `;
 
-  showSpinner(root.querySelector('#macroLoader'));
-  showSpinner(root.querySelector('#shortingLoader'));
+  ['#macroLoader','#investorLoader','#sectorHeatLoader','#shortingLoader']
+    .forEach(sel => showSpinner(root.querySelector(sel)));
 }
 
 // ─── Data Loading ─────────────────────────────────────────────────────────────
 
 async function loadAll() {
-  await Promise.all([loadIndicators(), loadShorting()]);
+  await Promise.all([loadIndicators(), loadInvestors(), loadSectorHeat(), loadShorting()]);
 }
 
 async function loadIndicators() {
@@ -88,6 +110,28 @@ async function loadShorting() {
     const loader = section.querySelector('#shortingLoader');
     if (loader) loader.innerHTML = '';
     showError(section, `공매도 데이터 로드 실패: ${err.message}`);
+  }
+}
+
+async function loadInvestors() {
+  const section = _rootEl?.querySelector('#investorSection');
+  if (!section) return;
+  try {
+    const result = await api.analysis.investors(_investorMarket, _investorDays);
+    renderInvestorSection(section, result);
+  } catch (err) {
+    showError(section, `투자자 수급 로드 실패: ${err.message}`);
+  }
+}
+
+async function loadSectorHeat() {
+  const section = _rootEl?.querySelector('#sectorHeatSection');
+  if (!section) return;
+  try {
+    const result = await api.analysis.sectorHeat(_sectorMarket, _sectorDays);
+    renderSectorHeatSection(section, result);
+  } catch (err) {
+    showError(section, `섹터 동향 로드 실패: ${err.message}`);
   }
 }
 
@@ -368,6 +412,211 @@ function renderShortingSection(section, result) {
       } catch (err) {
         showError(section, `공매도 데이터 로드 실패: ${err.message}`);
       }
+    });
+  });
+}
+
+// ─── Investor Section ─────────────────────────────────────────────────────────
+
+function renderInvestorSection(section, result) {
+  const { rows = [], date = '' } = result || {};
+
+  const fmt  = v => {
+    const t = v / 1e12;
+    const sign = t >= 0 ? '+' : '';
+    return `${sign}${t.toFixed(2)}조`;
+  };
+  const clr = v => v > 0 ? '#e53935' : v < 0 ? '#1e88e5' : 'var(--color-text-secondary)';
+
+  // 주요 3 투자자 카드
+  const BIG3 = ['기관합계', '외국인합계', '개인'];
+  const LABELS = { '기관합계': '기관', '외국인합계': '외국인', '개인': '개인' };
+  const big3Html = BIG3.map(inv => {
+    const r = rows.find(x => x.investor === inv);
+    if (!r) return '';
+    const netColor = clr(r.net);
+    return `
+      <div class="card card--shadow" style="flex:1;min-width:0">
+        <div class="card__body" style="padding:var(--space-5)">
+          <div style="font-size:var(--text-xs);color:var(--color-text-tertiary);margin-bottom:var(--space-2)">${LABELS[inv]}</div>
+          <div style="font-size:var(--text-xl);font-weight:var(--font-bold);color:${netColor};font-variant-numeric:tabular-nums">
+            ${fmt(r.net)}
+          </div>
+          <div style="display:flex;gap:var(--space-3);margin-top:var(--space-3);font-size:var(--text-xs);color:var(--color-text-tertiary)">
+            <span>매수 <b style="color:var(--color-text-primary)">${(r.buy/1e12).toFixed(1)}조</b></span>
+            <span>매도 <b style="color:var(--color-text-primary)">${(r.sell/1e12).toFixed(1)}조</b></span>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  // 세부 투자자 테이블
+  const DETAIL = ['금융투자','보험','투신','사모','연기금 등'];
+  const detailRows = rows
+    .filter(r => DETAIL.includes(r.investor))
+    .map(r => `
+      <tr>
+        <td>${r.investor}</td>
+        <td style="text-align:right;font-variant-numeric:tabular-nums">${(r.buy/1e8).toFixed(0)}억</td>
+        <td style="text-align:right;font-variant-numeric:tabular-nums">${(r.sell/1e8).toFixed(0)}억</td>
+        <td style="text-align:right;font-weight:var(--font-semibold);color:${clr(r.net)};font-variant-numeric:tabular-nums">
+          ${r.net > 0 ? '+' : ''}${(r.net/1e8).toFixed(0)}억
+        </td>
+      </tr>`).join('');
+
+  const DAYS_OPTS = [{v:1,l:'당일'},{v:5,l:'5일'},{v:20,l:'20일'}];
+  const MKT_OPTS  = ['KOSPI','KOSDAQ'];
+
+  section.innerHTML = `
+    <h2 style="font-size:var(--text-base);font-weight:var(--font-bold);color:var(--color-text-primary);margin-bottom:var(--space-4)">투자자별 수급</h2>
+    <div class="card card--shadow">
+      <div class="card__header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-2)">
+        <span class="card__title">기관 · 외국인 · 개인 순매수</span>
+        <div style="display:flex;gap:var(--space-2)">
+          <div class="btn-group">
+            ${MKT_OPTS.map(m => `<button class="btn-seg inv-mkt-btn ${_investorMarket===m?'active':''}" data-market="${m}">${m}</button>`).join('')}
+          </div>
+          <div class="btn-group">
+            ${DAYS_OPTS.map(o => `<button class="btn-seg inv-days-btn ${_investorDays===o.v?'active':''}" data-days="${o.v}">${o.l}</button>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="card__body" style="padding:var(--space-5)">
+        ${date ? `<div style="font-size:var(--text-xs);color:var(--color-text-tertiary);margin-bottom:var(--space-4)">${date} 기준</div>` : ''}
+        <div style="display:flex;gap:var(--space-4);margin-bottom:var(--space-6)">${big3Html}</div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="left">투자자</th>
+              <th style="text-align:right">매수</th>
+              <th style="text-align:right">매도</th>
+              <th style="text-align:right">순매수</th>
+            </tr>
+          </thead>
+          <tbody>${detailRows || '<tr><td colspan="4" style="text-align:center;padding:var(--space-6);color:var(--color-text-tertiary)">데이터 없음</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  section.querySelectorAll('.inv-mkt-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.market === _investorMarket) return;
+      _investorMarket = btn.dataset.market;
+      section.querySelectorAll('.inv-mkt-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      showSpinner(section.querySelector('.card__body'));
+      const res = await api.analysis.investors(_investorMarket, _investorDays).catch(() => null);
+      if (res) renderInvestorSection(section, res);
+    });
+  });
+  section.querySelectorAll('.inv-days-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const d = +btn.dataset.days;
+      if (d === _investorDays) return;
+      _investorDays = d;
+      section.querySelectorAll('.inv-days-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      showSpinner(section.querySelector('.card__body'));
+      const res = await api.analysis.investors(_investorMarket, _investorDays).catch(() => null);
+      if (res) renderInvestorSection(section, res);
+    });
+  });
+}
+
+// ─── Sector Heat Section ──────────────────────────────────────────────────────
+
+function renderSectorHeatSection(section, result) {
+  const { sectors = [], date = '', days = 5 } = result || {};
+
+  const fmtNet = v => {
+    if (!v) return '-';
+    const b = v / 1e8;
+    return (v > 0 ? '+' : '') + b.toFixed(0) + '억';
+  };
+  const clrNet = v => v > 0 ? '#e53935' : v < 0 ? '#1e88e5' : 'var(--color-text-secondary)';
+  const clrChg = v => v > 0 ? '#e53935' : v < 0 ? '#1e88e5' : 'var(--color-text-secondary)';
+  const fmtMkt = v => (v / 1e12).toFixed(0) + '조';
+
+  const rowsHtml = sectors.map((s, i) => `
+    <tr>
+      <td style="text-align:center;color:var(--color-text-tertiary)">${i + 1}</td>
+      <td style="font-weight:var(--font-semibold)">${s.krx_name}</td>
+      <td style="font-size:var(--text-xs);color:var(--color-text-tertiary)">${s.sector}</td>
+      <td style="text-align:right;color:${clrChg(s.avg_change)};font-weight:var(--font-semibold)">
+        ${s.avg_change > 0 ? '+' : ''}${s.avg_change.toFixed(2)}%
+      </td>
+      <td style="text-align:right;color:${clrNet(s.foreign_net)};font-weight:var(--font-semibold);font-variant-numeric:tabular-nums">
+        ${fmtNet(s.foreign_net)}
+      </td>
+      <td style="text-align:right;color:${clrNet(s.institution_net)};font-variant-numeric:tabular-nums">
+        ${fmtNet(s.institution_net)}
+      </td>
+      <td style="text-align:right;color:var(--color-text-tertiary);font-size:var(--text-xs)">${fmtMkt(s.total_mktcap)}</td>
+      <td style="text-align:right;color:var(--color-text-tertiary);font-size:var(--text-xs)">${s.stock_count}개</td>
+    </tr>`).join('');
+
+  const MKT_OPTS  = ['KOSPI','KOSDAQ'];
+  const DAYS_OPTS = [{v:1,l:'당일'},{v:5,l:'5일'},{v:20,l:'20일'}];
+
+  section.innerHTML = `
+    <h2 style="font-size:var(--text-base);font-weight:var(--font-bold);color:var(--color-text-primary);margin-bottom:var(--space-4)">섹터 동향</h2>
+    <div class="card card--shadow">
+      <div class="card__header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-2)">
+        <span class="card__title">업종별 등락 · 외국인/기관 순매수</span>
+        <div style="display:flex;gap:var(--space-2)">
+          <div class="btn-group">
+            ${MKT_OPTS.map(m => `<button class="btn-seg sec-mkt-btn ${_sectorMarket===m?'active':''}" data-market="${m}">${m}</button>`).join('')}
+          </div>
+          <div class="btn-group">
+            ${DAYS_OPTS.map(o => `<button class="btn-seg sec-days-btn ${_sectorDays===o.v?'active':''}" data-days="${o.v}">${o.l}</button>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="card__body" style="padding:0">
+        ${date ? `<div style="padding:var(--space-3) var(--space-4);font-size:var(--text-xs);color:var(--color-text-tertiary)">${date} 기준 · 외국인 순매수 순</div>` : ''}
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width:36px;text-align:center">순위</th>
+                <th class="left">업종</th>
+                <th class="left">섹터</th>
+                <th style="text-align:right">평균등락률</th>
+                <th style="text-align:right">외국인순매수</th>
+                <th style="text-align:right">기관순매수</th>
+                <th style="text-align:right">시가총액</th>
+                <th style="text-align:right">종목수</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml || '<tr><td colspan="8" style="text-align:center;padding:var(--space-8);color:var(--color-text-tertiary)">데이터 없음</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  section.querySelectorAll('.sec-mkt-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.market === _sectorMarket) return;
+      _sectorMarket = btn.dataset.market;
+      section.querySelectorAll('.sec-mkt-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      showSpinner(section.querySelector('.card__body'));
+      const res = await api.analysis.sectorHeat(_sectorMarket, _sectorDays).catch(() => null);
+      if (res) renderSectorHeatSection(section, res);
+    });
+  });
+  section.querySelectorAll('.sec-days-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const d = +btn.dataset.days;
+      if (d === _sectorDays) return;
+      _sectorDays = d;
+      section.querySelectorAll('.sec-days-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      showSpinner(section.querySelector('.card__body'));
+      const res = await api.analysis.sectorHeat(_sectorMarket, _sectorDays).catch(() => null);
+      if (res) renderSectorHeatSection(section, res);
     });
   });
 }

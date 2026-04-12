@@ -5,7 +5,8 @@ import { priceBadgeHtml, formatNumber, formatPct } from '../components/priceTag.
 import { createCandlestickChart, updateCandlestickChart } from '../charts/candlestick.js';
 
 let _chart = null;
-let _finCharts = [];   // 실적 차트 인스턴스 목록
+let _finCharts = [];      // 실적 차트 인스턴스 목록
+let _investorChart = null; // 투자자 수급 차트
 let _ticker = null;
 let _ohlcvAll = [];
 
@@ -35,6 +36,7 @@ export const stockDetailView = {
   },
   unmount() {
     if (_chart) { _chart.destroy(); _chart = null; }
+    if (_investorChart) { _investorChart.destroy(); _investorChart = null; }
     _finCharts.forEach(c => c.destroy());
     _finCharts = [];
     _ohlcvAll = [];
@@ -54,9 +56,10 @@ async function loadDetail(root, ticker) {
     const priceByDate = Object.fromEntries(_ohlcvAll.map(d => [d.x, d.c]));
     renderDetail(root, ticker, detail, fundamentals.data || [], priceByDate);
 
-    // 실적·분석 섹션은 병렬로 비동기 로드
+    // 실적·분석·수급 섹션은 병렬로 비동기 로드
     loadFinancials(ticker);
     loadAnalysis(ticker);
+    loadInvestorFlow(ticker);
   } catch (err) {
     root.innerHTML = '';
     showError(root, `데이터 로드 실패: ${err.message}`);
@@ -82,6 +85,17 @@ async function loadAnalysis(ticker) {
     renderAnalysis(section, data);
   } catch (err) {
     section.innerHTML = `<p style="color:var(--color-text-tertiary);font-size:var(--text-sm);padding:var(--space-4)">분석 데이터를 불러올 수 없습니다.</p>`;
+  }
+}
+
+async function loadInvestorFlow(ticker) {
+  const section = document.getElementById('investorSection');
+  if (!section) return;
+  try {
+    const res = await api.stocks.investorTrading(ticker, 60);
+    renderInvestorFlow(section, res);
+  } catch (err) {
+    section.innerHTML = '';
   }
 }
 
@@ -151,6 +165,14 @@ function renderDetail(root, ticker, detail, fundamentals, priceByDate = {}) {
       <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4);color:var(--color-text-tertiary)">
         <div class="spinner" style="width:14px;height:14px;border-width:2px"></div>
         <span style="font-size:var(--text-sm)">실적 데이터 로딩 중...</span>
+      </div>
+    </div>
+
+    <!-- 투자자 수급 (비동기 로드) -->
+    <div id="investorSection" style="margin-bottom:var(--space-5)">
+      <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4);color:var(--color-text-tertiary)">
+        <div class="spinner" style="width:14px;height:14px;border-width:2px"></div>
+        <span style="font-size:var(--text-sm)">투자자 수급 로딩 중...</span>
       </div>
     </div>
 
@@ -675,4 +697,98 @@ function renderFinancials(section, rawData) {
       },
     },
   }));
+}
+
+// ── 투자자 수급 ────────────────────────────────────────────────────────────
+
+function renderInvestorFlow(section, res) {
+  const flow    = res?.flow    || [];
+  const summary = res?.summary || {};
+  const summaryRows = summary.rows || [];
+
+  if (!flow.length && !summaryRows.length) {
+    section.innerHTML = '';
+    return;
+  }
+
+  const clr = v => v > 0 ? '#e53935' : v < 0 ? '#1e88e5' : '#8b95a1';
+  const fmt = v => {
+    const b = v / 1e8;
+    return (v > 0 ? '+' : '') + b.toFixed(0) + '억';
+  };
+
+  // 기간 합산 요약 카드
+  const BIG3 = ['기관합계','외국인합계','개인'];
+  const LABELS = {'기관합계':'기관','외국인합계':'외국인','개인':'개인'};
+  const summaryHtml = BIG3.map(inv => {
+    const r = summaryRows.find(x => x.investor === inv);
+    if (!r) return '';
+    return `
+      <div style="flex:1;min-width:0;padding:var(--space-4);background:var(--color-bg-secondary);border-radius:var(--radius-md);text-align:center">
+        <div style="font-size:var(--text-xs);color:var(--color-text-tertiary);margin-bottom:4px">${LABELS[inv]}</div>
+        <div style="font-size:var(--text-base);font-weight:var(--font-bold);color:${clr(r.net)}">
+          ${fmt(r.net)}
+        </div>
+        <div style="font-size:var(--text-xs);color:var(--color-text-tertiary);margin-top:2px">
+          매수 ${(r.buy/1e8).toFixed(0)}억 / 매도 ${(r.sell/1e8).toFixed(0)}억
+        </div>
+      </div>`;
+  }).join('');
+
+  // 일별 순매수 차트 데이터
+  const labels = flow.map(d => d.date.slice(5));   // MM-DD
+  const instData = flow.map(d => d.institution / 1e8);
+  const foreignData = flow.map(d => d.foreign / 1e8);
+  const indivData = flow.map(d => d.individual / 1e8);
+
+  section.innerHTML = `
+    <div class="card card--shadow">
+      <div class="card__header">
+        <span class="card__title">투자자별 수급</span>
+        <span style="font-size:var(--text-xs);color:var(--color-text-tertiary)">최근 60일 · 억원 기준</span>
+      </div>
+      <div class="card__body" style="padding:var(--space-5)">
+        <div style="display:flex;gap:var(--space-3);margin-bottom:var(--space-5)">${summaryHtml}</div>
+        <div class="chart-wrap" style="height:220px"><canvas id="investorChart"></canvas></div>
+      </div>
+    </div>
+  `;
+
+  if (_investorChart) { _investorChart.destroy(); _investorChart = null; }
+  const ctx = section.querySelector('#investorChart');
+  if (!ctx) return;
+
+  _investorChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: '기관', data: instData,   backgroundColor: 'rgba(251,146,60,0.7)',  borderWidth: 0 },
+        { label: '외국인', data: foreignData, backgroundColor: 'rgba(59,130,246,0.7)', borderWidth: 0 },
+        { label: '개인', data: indivData,  backgroundColor: 'rgba(139,149,161,0.5)', borderWidth: 0 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 11 }, boxWidth: 10 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.raw >= 0 ? '+' : ''}${ctx.raw.toFixed(0)}억`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          stacked: false,
+          ticks: { font: { size: 10 }, maxTicksLimit: 10 },
+          grid: { display: false },
+        },
+        y: {
+          ticks: { font: { size: 10 }, callback: v => v + '억' },
+          grid: { color: 'rgba(0,0,0,0.05)' },
+        },
+      },
+    },
+  });
 }
