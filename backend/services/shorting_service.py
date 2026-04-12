@@ -1,9 +1,6 @@
 """pykrx 공매도 데이터 수집 서비스.
 
-주의: pykrx 공매도 API는 KRX 웹사이트 구조 변경으로 인해
-      일부 함수가 정상 동작하지 않을 수 있음.
-      현재 KRX 공매도 데이터는 수집 불가 상태이며,
-      향후 pykrx 업데이트 또는 KRX OpenAPI 전환 시 복구 예정.
+KRX 로그인 세션(krx_session.manager)을 통해 pykrx API 정상 동작.
 """
 import logging
 import numpy as np
@@ -13,7 +10,7 @@ from cache.ttl_cache import cache
 from config import Config
 from utils.date_utils import n_days_ago, latest_trading_date
 
-SHORTING_UNAVAILABLE = True   # pykrx KRX API 변경으로 공매도 데이터 수집 불가
+SHORTING_UNAVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +101,7 @@ def _fetch_shorting_pykrx(ticker: str, from_date: str, to_date: str) -> list[dic
                 result[d] = {
                     "date":            d,
                     "shorting_volume": int(row.get("공매도", 0) or 0),
-                    "total_volume":    int(row.get("전체", 0) or 0),
+                    "total_volume":    int(row.get("매수", 0) or 0),
                     "shorting_ratio":  float(row.get("비중", 0) or 0),
                     "balance":         None,
                     "balance_value":   None,
@@ -121,7 +118,7 @@ def _fetch_shorting_pykrx(ticker: str, from_date: str, to_date: str) -> list[dic
                 d = str(row["date"])[:10]
                 if d in result:
                     result[d]["balance"]       = int(row.get("공매도잔고", 0) or 0)
-                    result[d]["balance_value"] = int(row.get("잔고금액", 0) or 0)
+                    result[d]["balance_value"] = int(row.get("공매도금액", 0) or 0)
     except Exception as e:
         logger.debug("공매도 잔고 조회 실패 (%s): %s", ticker, e)
 
@@ -199,7 +196,7 @@ def get_market_shorting_ranking(market: str = "KOSPI", top_n: int = 20) -> dict:
                 "ticker": ticker,
                 "name": get_ticker_name(ticker),
                 "shorting_volume": int(row.get("공매도", 0) or 0),
-                "total_volume":    int(row.get("전체", 0) or 0),
+                "total_volume":    int(row.get("매수", 0) or 0),
                 "shorting_ratio":  ratio,
             })
 

@@ -289,22 +289,22 @@ def collect_market_cap(date_str: str) -> int:
 
 
 # ── 5. 투자자별 수급 수집 ──────────────────────────────────────────────────
-# pykrx get_market_net_purchases_of_equities(fromdate, todate, market, investor)
+# pykrx get_market_net_purchases_of_equities_by_ticker(fromdate, todate, market, investor)
 # 컬럼: 종목명, 매도거래량, 매수거래량, 순매수거래량, 매도거래대금, 매수거래대금, 순매수거래대금
 # index: 티커
-# investor: '개인' | '기관합계' | '외국인합계'
+# investor: '개인' | '기관합계' | '외국인'  (외국인합계 → 외국인)
 
 _INVESTOR_MAP = [
-    ("개인",      "individual"),
-    ("기관합계",   "institutional"),
-    ("외국인합계", "foreign"),
+    ("개인",    "individual"),
+    ("기관합계", "institutional"),
+    ("외국인",  "foreign"),       # '외국인합계'는 빈 DF 반환 → '외국인' 사용
 ]
 
 def _fetch_investor(date_str: str, market: str, inv_label: str, inv_key: str) -> dict[str, dict]:
     """단일 (마켓 × 투자자) 조합 API 호출. {ticker: {buy, sell}} 반환."""
     result = {}
     try:
-        df = krx_stock.get_market_net_purchases_of_equities(
+        df = krx_stock.get_market_net_purchases_of_equities_by_ticker(
             date_str, date_str, market, inv_label
         )
         if df.empty:
