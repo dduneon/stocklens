@@ -62,8 +62,8 @@ def get_index_chart(market: str = "KOSPI", days: int = 90) -> list[dict]:
         return cached
 
     try:
+        to_date   = latest_trading_date()
         from_date = n_days_ago(days)
-        to_date = today_str()
         df = krx_stock.get_index_ohlcv(from_date, to_date, ticker)
         if df.empty:
             return []
