@@ -4,6 +4,10 @@ from flask import Blueprint, jsonify, request
 from services.analysis_service import get_stock_analysis
 from services.ecos_service import get_macro_indicators
 from services.shorting_service import get_market_shorting_ranking
+from services.investor_service import (
+    get_market_investor_summary,
+    get_sector_heat,
+)
 
 logger = logging.getLogger(__name__)
 analysis_bp = Blueprint("analysis", __name__)
@@ -40,4 +44,28 @@ def market_shorting():
         return jsonify({"market": market, **result})
     except Exception as e:
         logger.exception("공매도 랭킹 조회 실패: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@analysis_bp.get("/market/investors")
+def market_investors():
+    """시장 전체 투자자별 매수/매도/순매수."""
+    market = request.args.get("market", "KOSPI")
+    days   = min(int(request.args.get("days", 1)), 20)
+    try:
+        return jsonify(get_market_investor_summary(market, days))
+    except Exception as e:
+        logger.exception("시장 투자자 현황 조회 실패: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@analysis_bp.get("/market/sector-heat")
+def sector_heat():
+    """섹터별 등락률 + 외국인·기관 순매수 (어떤 섹터가 핫한가)."""
+    market = request.args.get("market", "KOSPI")
+    days   = min(int(request.args.get("days", 5)), 20)
+    try:
+        return jsonify(get_sector_heat(market, days))
+    except Exception as e:
+        logger.exception("섹터 핫 분석 실패: %s", e)
         return jsonify({"error": str(e)}), 500

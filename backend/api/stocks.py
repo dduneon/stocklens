@@ -10,6 +10,10 @@ from services.stock_service import (
     get_investor_trading,
     get_financial_statements,
 )
+from services.investor_service import (
+    get_stock_investor_flow,
+    get_stock_investor_summary,
+)
 from utils.date_utils import today_str, n_days_ago, latest_trading_date
 
 stocks_bp = Blueprint("stocks", __name__)
@@ -129,15 +133,18 @@ def stock_fundamentals(ticker: str):
 
 @stocks_bp.get("/<ticker>/investor-trading")
 def stock_investor_trading(ticker: str):
-    days = min(int(request.args.get("days", 30)), 365)
+    """종목별 투자자 수급: 일별 순매수 추이(flow) + 기간 합산(summary)."""
+    days = min(int(request.args.get("days", 60)), 365)
     from_date = request.args.get("from_date", n_days_ago(days))
     to_date = request.args.get("to_date", today_str())
-    data = get_investor_trading(ticker, from_date, to_date)
+    flow    = get_stock_investor_flow(ticker, from_date, to_date)
+    summary = get_stock_investor_summary(ticker, from_date, to_date)
     return jsonify({
-        "ticker": ticker,
-        "from": from_date,
-        "to": to_date,
-        "data": data,
+        "ticker":   ticker,
+        "from":     from_date,
+        "to":       to_date,
+        "flow":     flow,
+        "summary":  summary,
     })
 
 
