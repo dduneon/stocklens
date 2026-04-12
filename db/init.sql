@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS daily_fundamental (
     per         DECIMAL(10,4),
     pbr         DECIMAL(10,4),
     eps         BIGINT,
-    div         DECIMAL(8,4),
+    `div`       DECIMAL(8,4),
     dps         BIGINT,
     PRIMARY KEY (ticker, date),
     CONSTRAINT fk_fund_ticker FOREIGN KEY (ticker) REFERENCES tickers(ticker) ON DELETE CASCADE
@@ -120,7 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_disc_date   ON dart_disclosure(disclosed_at);
 CREATE TABLE IF NOT EXISTS macro_indicator (
     indicator   VARCHAR(50)   NOT NULL,
     date        DATE          NOT NULL,
-    value       DECIMAL(14,4),
+    `value`     DECIMAL(14,4),
     PRIMARY KEY (indicator, date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
