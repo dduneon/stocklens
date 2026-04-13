@@ -372,17 +372,12 @@ def collect_investor_trading(date_str: str) -> int:
 # pykrx get_market_trading_value_by_investor(fromdate, todate, market)
 # 반환: index=투자자, columns=매도/매수/순매수
 
-_INVESTOR_DETAIL = [
-    "기관합계", "외국인합계", "개인",
-    "금융투자", "보험", "투신", "사모", "연기금 등",
-]
-
 def collect_market_investor_trading(date_str: str) -> int:
     """시장 단위 투자자별 매매 집계 수집.
 
     종목별 수급(daily_investor_trading)과 별개로 시장 전체 합산 데이터를
     daily_market_investor 테이블에 저장한다.
-    세부 투자자(금융투자/보험/투신/사모/연기금 등) 포함.
+    pykrx가 반환하는 모든 투자자 행을 그대로 저장 (화이트리스트 없음).
     """
     log_id = _log_start("collect_market_investor")
     total = 0
@@ -395,18 +390,17 @@ def collect_market_investor_trading(date_str: str) -> int:
                 )
                 if df.empty:
                     continue
-                for investor in _INVESTOR_DETAIL:
-                    if investor not in df.index:
-                        continue
+                for investor in df.index:
                     r = df.loc[investor]
                     rows.append({
                         "market":   market,
                         "date":     date_str,
-                        "investor": investor,
+                        "investor": str(investor),
                         "buy":      _safe_int(r.get("매수")),
                         "sell":     _safe_int(r.get("매도")),
                         "net":      _safe_int(r.get("순매수")),
                     })
+                logger.debug("market_investor (%s) 수집: %s", market, list(df.index))
             except Exception as e:
                 logger.warning("시장 투자자 수급 수집 실패 (%s): %s", market, e)
 

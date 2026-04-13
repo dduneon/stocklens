@@ -179,7 +179,9 @@ def get_market_investor_summary(market: str = "KOSPI", days: int = 1) -> dict:
     fd = datetime.strptime(from_date, "%Y%m%d").date()
     td = datetime.strptime(to_date, "%Y%m%d").date()
 
-    SHOW_ORDER = ["기관합계", "외국인합계", "개인", "금융투자", "보험", "투신", "사모", "연기금 등"]
+    # pykrx 버전에 따라 "외국인합계" 또는 "외국인" 으로 반환될 수 있으므로 둘 다 허용
+    # 표시 우선순위: 기관합계 → 외국인합계(또는 외국인) → 개인 → 세부분류
+    SHOW_ORDER = ["기관합계", "외국인합계", "외국인", "개인", "금융투자", "보험", "투신", "사모", "연기금 등"]
 
     # 1순위: daily_market_investor (세부 분류 포함, 배치 수집 후 사용 가능)
     try:
@@ -206,7 +208,8 @@ def get_market_investor_summary(market: str = "KOSPI", days: int = 1) -> dict:
         if db_rows:
             rows = [
                 {
-                    "investor": inv,
+                    # "외국인" → 프론트에서 "외국인합계" 카드에 표시되도록 레이블 통일
+                    "investor": "외국인합계" if inv == "외국인" else inv,
                     "buy":  int(db_rows[inv].buy  or 0),
                     "sell": int(db_rows[inv].sell or 0),
                     "net":  int(db_rows[inv].net  or 0),
