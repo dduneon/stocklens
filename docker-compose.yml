@@ -1,23 +1,4 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: stocklens_db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: stocklens
-      POSTGRES_USER: stocklens
-      POSTGRES_PASSWORD: stocklens_pw
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U stocklens -d stocklens"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   backend:
     build:
       context: .
@@ -29,12 +10,4 @@ services:
     env_file:
       - .env
     environment:
-      # 컨테이너 내부에서는 postgres 서비스명으로 연결
-      DATABASE_URL: postgresql+psycopg2://stocklens:stocklens_pw@postgres:5432/stocklens
       FLASK_PORT: "5001"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-volumes:
-  pgdata:
