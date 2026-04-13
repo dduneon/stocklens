@@ -7,6 +7,7 @@ from utils.date_utils import today_str, n_days_ago, fmt_datetime, latest_trading
 from utils.serializers import ohlcv_df_to_chart
 from config import Config
 from services.stock_service import get_market_ohlcv_snapshot
+from krx_session.manager import login_krx, is_logged_in
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +16,11 @@ KOSDAQ_INDEX_TICKER = "2001"
 
 
 def get_market_summary(market: str = "KOSPI") -> dict:
-    cache_key = f"market_summary:{market}"
+    date = latest_trading_date()
+    cache_key = f"market_summary:{market}:{date}"   # 날짜 포함 → 배치 후 자동 갱신
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-
-    date = latest_trading_date()
     records = get_market_ohlcv_snapshot(date, market)
 
     if not records:
@@ -56,15 +56,25 @@ def get_market_summary(market: str = "KOSPI") -> dict:
 def get_index_chart(market: str = "KOSPI", days: int = 90) -> list[dict]:
     """KOSPI/KOSDAQ 지수 OHLCV — pykrx 직접 조회 (지수 데이터는 DB에 미적재)."""
     ticker = KOSPI_INDEX_TICKER if market == "KOSPI" else KOSDAQ_INDEX_TICKER
-    cache_key = f"index_chart:{market}:{days}"
+    to_date   = latest_trading_date()
+    from_date = n_days_ago(days)
+    cache_key = f"index_chart:{market}:{days}:{to_date}"  # 날짜 포함 → 배치 후 자동 갱신
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
+    # KRX 세션 만료 시 재로그인
+    if not is_logged_in():
+        logger.info("KRX 세션 만료 — 재로그인 시도")
+        login_krx(Config.KRX_LOGIN_ID, Config.KRX_LOGIN_PW)
+
     try:
-        to_date   = latest_trading_date()
-        from_date = n_days_ago(days)
         df = krx_stock.get_index_ohlcv(from_date, to_date, ticker)
+        if df.empty:
+            # 세션 문제로 빈 DF 반환됐을 수 있음 — 재시도 1회
+            logger.warning("지수 OHLCV 빈 응답 (%s) — 세션 갱신 후 재시도", market)
+            login_krx(Config.KRX_LOGIN_ID, Config.KRX_LOGIN_PW)
+            df = krx_stock.get_index_ohlcv(from_date, to_date, ticker)
         if df.empty:
             return []
         df.index.name = "date"
