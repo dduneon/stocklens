@@ -11,3 +11,10 @@ services:
       - .env
     environment:
       FLASK_PORT: "5001"
+    networks:
+      - test_network
+
+
+networks:
+  test_network:
+    external: true  # ← 동일한 외부 네트워크 참조
