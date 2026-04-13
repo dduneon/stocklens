@@ -263,7 +263,8 @@ def get_market_investor_summary(market: str = "KOSPI", days: int = 1) -> dict:
                  "net": int((row.ind_buy or 0) - (row.ind_sell or 0))},
             ]
             result = {"rows": rows, "market": market, "date": to_date}
-            cache.set(cache_key, result, ttl=Config.CACHE_TTL_MARKET)
+            # 2순위 결과(세부분류 없음)는 짧게 캐시 → 배치 후 빠르게 갱신
+            cache.set(cache_key, result, ttl=60)
             return result
     except Exception as e:
         logger.warning("시장 투자자 DB 집계 실패 (daily_investor_trading): %s", e)
