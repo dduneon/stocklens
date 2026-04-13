@@ -205,7 +205,9 @@ def get_market_investor_summary(market: str = "KOSPI", days: int = 1) -> dict:
             )
             db_rows = {r.investor: r for r in s.execute(q).all()}
 
-        if db_rows:
+        # 외국인합계 또는 외국인 둘 중 하나라도 있어야 유효한 데이터로 간주
+        has_foreign = "외국인합계" in db_rows or "외국인" in db_rows
+        if db_rows and has_foreign:
             rows = [
                 {
                     # "외국인" → 프론트에서 "외국인합계" 카드에 표시되도록 레이블 통일
