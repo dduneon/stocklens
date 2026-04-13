@@ -166,15 +166,26 @@ def get_market_investor_summary(market: str = "KOSPI", days: int = 1) -> dict:
 
     DB에서 날짜 범위 집계. 없으면 pykrx fallback.
     """
-    to_date   = latest_trading_date()
+    # daily_market_investor 자체의 최신 날짜 기준으로 조회
+    # (daily_ohlcv 기준 latest_trading_date와 다를 수 있음 — 비거래일 수동 수집 포함)
+    from db.engine import get_session
+    from sqlalchemy import select, and_, func
+
+    try:
+        from db.models import DailyMarketInvestor as _DMI
+        with get_session() as _s:
+            _latest = _s.execute(
+                select(func.max(_DMI.date)).where(_DMI.market == market)
+            ).scalar()
+        to_date = _latest.strftime("%Y%m%d") if _latest else latest_trading_date()
+    except Exception:
+        to_date = latest_trading_date()
+
     from_date = n_days_ago(days + 5)  # 주말 여유
     cache_key = f"market_investor:{market}:{to_date}:{days}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-
-    from db.engine import get_session
-    from sqlalchemy import select, and_, func
 
     fd = datetime.strptime(from_date, "%Y%m%d").date()
     td = datetime.strptime(to_date, "%Y%m%d").date()
