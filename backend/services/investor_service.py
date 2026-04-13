@@ -173,53 +173,53 @@ def get_market_investor_summary(market: str = "KOSPI", days: int = 1) -> dict:
     if cached is not None:
         return cached
 
-    # DB 집계 (날짜 범위 내 최근 N 거래일 합산)
+    # DB 조회 (daily_market_investor — 세부 분류 포함)
     try:
         from db.engine import get_session
-        from db.models import DailyInvestorTrading, Ticker
+        from db.models import DailyMarketInvestor
         from sqlalchemy import select, and_, func
 
         fd = datetime.strptime(from_date, "%Y%m%d").date()
         td = datetime.strptime(to_date, "%Y%m%d").date()
 
+        SHOW_ORDER = ["기관합계", "외국인합계", "개인", "금융투자", "보험", "투신", "사모", "연기금 등"]
+
         with get_session() as s:
             q = (
                 select(
-                    func.sum(DailyInvestorTrading.institutional_buy).label("inst_buy"),
-                    func.sum(DailyInvestorTrading.institutional_sell).label("inst_sell"),
-                    func.sum(DailyInvestorTrading.foreign_buy).label("for_buy"),
-                    func.sum(DailyInvestorTrading.foreign_sell).label("for_sell"),
-                    func.sum(DailyInvestorTrading.individual_buy).label("ind_buy"),
-                    func.sum(DailyInvestorTrading.individual_sell).label("ind_sell"),
+                    DailyMarketInvestor.investor,
+                    func.sum(DailyMarketInvestor.buy).label("buy"),
+                    func.sum(DailyMarketInvestor.sell).label("sell"),
+                    func.sum(DailyMarketInvestor.net).label("net"),
                 )
-                .join(Ticker, Ticker.ticker == DailyInvestorTrading.ticker)
                 .where(
                     and_(
-                        DailyInvestorTrading.date >= fd,
-                        DailyInvestorTrading.date <= td,
-                        Ticker.market == market,
+                        DailyMarketInvestor.market == market,
+                        DailyMarketInvestor.date >= fd,
+                        DailyMarketInvestor.date <= td,
                     )
                 )
+                .group_by(DailyMarketInvestor.investor)
             )
-            row = s.execute(q).one()
+            db_rows = {r.investor: r for r in s.execute(q).all()}
 
-        if row and row.inst_buy:
+        if db_rows:
             rows = [
-                {"investor": "기관합계",
-                 "buy": int(row.inst_buy or 0), "sell": int(row.inst_sell or 0),
-                 "net": int((row.inst_buy or 0) - (row.inst_sell or 0))},
-                {"investor": "외국인합계",
-                 "buy": int(row.for_buy or 0), "sell": int(row.for_sell or 0),
-                 "net": int((row.for_buy or 0) - (row.for_sell or 0))},
-                {"investor": "개인",
-                 "buy": int(row.ind_buy or 0), "sell": int(row.ind_sell or 0),
-                 "net": int((row.ind_buy or 0) - (row.ind_sell or 0))},
+                {
+                    "investor": inv,
+                    "buy":  int(db_rows[inv].buy  or 0),
+                    "sell": int(db_rows[inv].sell or 0),
+                    "net":  int(db_rows[inv].net  or 0),
+                }
+                for inv in SHOW_ORDER
+                if inv in db_rows
             ]
-            result = {"rows": rows, "market": market, "date": to_date}
-            cache.set(cache_key, result, ttl=Config.CACHE_TTL_MARKET)
-            return result
+            if rows:
+                result = {"rows": rows, "market": market, "date": to_date}
+                cache.set(cache_key, result, ttl=Config.CACHE_TTL_MARKET)
+                return result
     except Exception as e:
-        logger.warning("시장 투자자 DB 집계 실패: %s", e)
+        logger.warning("시장 투자자 DB 조회 실패: %s", e)
 
     # fallback: pykrx (금융투자/보험/투신 등 세부 분류)
     try:

@@ -84,6 +84,18 @@ class FinancialStatement(Base):
     updated_at       = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
 
+class DailyMarketInvestor(Base):
+    """시장 전체 투자자별 매매 동향 (세부 분류 포함)."""
+    __tablename__ = "daily_market_investor"
+
+    market   = Column(String(10), primary_key=True)   # 'KOSPI' | 'KOSDAQ'
+    date     = Column(Date, primary_key=True)
+    investor = Column(String(20), primary_key=True)   # '기관합계' | '외국인합계' | '개인' | '금융투자' | ...
+    buy      = Column(BigInteger)
+    sell     = Column(BigInteger)
+    net      = Column(BigInteger)
+
+
 class DailyShorting(Base):
     """일별 공매도 데이터 (pykrx)."""
     __tablename__ = "daily_shorting"

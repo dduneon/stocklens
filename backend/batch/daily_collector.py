@@ -38,7 +38,7 @@ from krx_session.manager import login_krx, is_logged_in
 from db.engine import engine, get_session
 from db.models import (
     Ticker, DailyOHLCV, DailyFundamental,
-    DailyMarketCap, DailyInvestorTrading, BatchLog,
+    DailyMarketCap, DailyInvestorTrading, DailyMarketInvestor, BatchLog,
 )
 from utils.date_utils import today_str, n_days_ago
 
@@ -368,6 +368,59 @@ def collect_investor_trading(date_str: str) -> int:
     return total
 
 
+# ── 6. 시장 전체 투자자별 수급 수집 (세부 분류 포함) ──────────────────────
+# pykrx get_market_trading_value_by_investor(fromdate, todate, market)
+# 반환: index=투자자, columns=매도/매수/순매수
+
+_INVESTOR_DETAIL = [
+    "기관합계", "외국인합계", "개인",
+    "금융투자", "보험", "투신", "사모", "연기금 등",
+]
+
+def collect_market_investor_trading(date_str: str) -> int:
+    """시장 단위 투자자별 매매 집계 수집.
+
+    종목별 수급(daily_investor_trading)과 별개로 시장 전체 합산 데이터를
+    daily_market_investor 테이블에 저장한다.
+    세부 투자자(금융투자/보험/투신/사모/연기금 등) 포함.
+    """
+    log_id = _log_start("collect_market_investor")
+    total = 0
+    try:
+        rows = []
+        for market in MARKETS:
+            try:
+                df = krx_stock.get_market_trading_value_by_investor(
+                    date_str, date_str, market
+                )
+                if df.empty:
+                    continue
+                for investor in _INVESTOR_DETAIL:
+                    if investor not in df.index:
+                        continue
+                    r = df.loc[investor]
+                    rows.append({
+                        "market":   market,
+                        "date":     date_str,
+                        "investor": investor,
+                        "buy":      _safe_int(r.get("매수")),
+                        "sell":     _safe_int(r.get("매도")),
+                        "net":      _safe_int(r.get("순매수")),
+                    })
+            except Exception as e:
+                logger.warning("시장 투자자 수급 수집 실패 (%s): %s", market, e)
+
+        if rows:
+            with get_session() as s:
+                total = _upsert(s, DailyMarketInvestor, rows, ["market", "date", "investor"])
+        _log_done(log_id, total)
+        logger.info("market_investor upserted: %d rows", total)
+    except Exception as e:
+        _log_fail(log_id, str(e))
+        logger.error("collect_market_investor_trading 실패: %s", e)
+    return total
+
+
 # ── 전체 배치 실행 ──────────────────────────────────────────────────────────
 
 def run_daily_batch(date_str: str | None = None) -> None:
@@ -380,6 +433,7 @@ def run_daily_batch(date_str: str | None = None) -> None:
     collect_fundamentals(date_str)
     collect_market_cap(date_str)
     collect_investor_trading(date_str)
+    collect_market_investor_trading(date_str)
 
     elapsed = (datetime.now() - t0).total_seconds()
     logger.info("===== 일별 배치 완료: %.1f초 =====", elapsed)
@@ -442,6 +496,7 @@ def _backfill_one_date(date_str: str) -> bool:
         collect_fundamentals(date_str)
         collect_market_cap(date_str)
         collect_investor_trading(date_str)
+        collect_market_investor_trading(date_str)
         return True
     except Exception as e:
         logger.warning("backfill 실패 (%s): %s", date_str, e)

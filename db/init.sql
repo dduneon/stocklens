@@ -73,6 +73,18 @@ CREATE TABLE IF NOT EXISTS daily_investor_trading (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE INDEX IF NOT EXISTS idx_investor_date ON daily_investor_trading(date);
 
+-- ── 시장 전체 투자자별 수급 (세부 분류) ───────────────────────────────
+CREATE TABLE IF NOT EXISTS daily_market_investor (
+    market      VARCHAR(10)  NOT NULL,
+    date        DATE         NOT NULL,
+    investor    VARCHAR(20)  NOT NULL,
+    buy         BIGINT,
+    sell        BIGINT,
+    net         BIGINT,
+    PRIMARY KEY (market, date, investor)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE INDEX IF NOT EXISTS idx_mkt_inv_date ON daily_market_investor(date);
+
 -- ── 일별 공매도 ────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS daily_shorting (
     ticker          VARCHAR(10)  NOT NULL,

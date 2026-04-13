@@ -493,7 +493,10 @@ function renderInvestorSection(section, result) {
               <th style="text-align:right">순매수</th>
             </tr>
           </thead>
-          <tbody>${detailRows || '<tr><td colspan="4" style="text-align:center;padding:var(--space-6);color:var(--color-text-tertiary)">데이터 없음</td></tr>'}</tbody>
+          <tbody>${detailRows || `<tr><td colspan="4" style="text-align:center;padding:var(--space-6)">
+            <div style="color:var(--color-text-tertiary);font-size:var(--text-sm)">세부 분류 데이터 없음</div>
+            <div style="color:var(--color-text-tertiary);font-size:var(--text-xs);margin-top:var(--space-1)">배치 수집 후 금융투자 · 보험 · 투신 · 사모 · 연기금 데이터가 표시됩니다</div>
+          </td></tr>`}</tbody>
         </table>
       </div>
     </div>
