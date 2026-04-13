@@ -173,17 +173,17 @@ def get_market_investor_summary(market: str = "KOSPI", days: int = 1) -> dict:
     if cached is not None:
         return cached
 
-    # DB 조회 (daily_market_investor — 세부 분류 포함)
+    from db.engine import get_session
+    from sqlalchemy import select, and_, func
+
+    fd = datetime.strptime(from_date, "%Y%m%d").date()
+    td = datetime.strptime(to_date, "%Y%m%d").date()
+
+    SHOW_ORDER = ["기관합계", "외국인합계", "개인", "금융투자", "보험", "투신", "사모", "연기금 등"]
+
+    # 1순위: daily_market_investor (세부 분류 포함, 배치 수집 후 사용 가능)
     try:
-        from db.engine import get_session
         from db.models import DailyMarketInvestor
-        from sqlalchemy import select, and_, func
-
-        fd = datetime.strptime(from_date, "%Y%m%d").date()
-        td = datetime.strptime(to_date, "%Y%m%d").date()
-
-        SHOW_ORDER = ["기관합계", "외국인합계", "개인", "금융투자", "보험", "투신", "사모", "연기금 등"]
-
         with get_session() as s:
             q = (
                 select(
@@ -219,9 +219,51 @@ def get_market_investor_summary(market: str = "KOSPI", days: int = 1) -> dict:
                 cache.set(cache_key, result, ttl=Config.CACHE_TTL_MARKET)
                 return result
     except Exception as e:
-        logger.warning("시장 투자자 DB 조회 실패: %s", e)
+        logger.warning("시장 투자자 DB 조회 실패 (daily_market_investor): %s", e)
 
-    # fallback: pykrx (금융투자/보험/투신 등 세부 분류)
+    # 2순위: daily_investor_trading 집계 (기관합계/외국인합계/개인 3종)
+    try:
+        from db.models import DailyInvestorTrading, Ticker
+        with get_session() as s:
+            q = (
+                select(
+                    func.sum(DailyInvestorTrading.institutional_buy).label("inst_buy"),
+                    func.sum(DailyInvestorTrading.institutional_sell).label("inst_sell"),
+                    func.sum(DailyInvestorTrading.foreign_buy).label("for_buy"),
+                    func.sum(DailyInvestorTrading.foreign_sell).label("for_sell"),
+                    func.sum(DailyInvestorTrading.individual_buy).label("ind_buy"),
+                    func.sum(DailyInvestorTrading.individual_sell).label("ind_sell"),
+                )
+                .join(Ticker, Ticker.ticker == DailyInvestorTrading.ticker)
+                .where(
+                    and_(
+                        DailyInvestorTrading.date >= fd,
+                        DailyInvestorTrading.date <= td,
+                        Ticker.market == market,
+                    )
+                )
+            )
+            row = s.execute(q).one()
+
+        if row and row.inst_buy:
+            rows = [
+                {"investor": "기관합계",
+                 "buy": int(row.inst_buy or 0), "sell": int(row.inst_sell or 0),
+                 "net": int((row.inst_buy or 0) - (row.inst_sell or 0))},
+                {"investor": "외국인합계",
+                 "buy": int(row.for_buy or 0), "sell": int(row.for_sell or 0),
+                 "net": int((row.for_buy or 0) - (row.for_sell or 0))},
+                {"investor": "개인",
+                 "buy": int(row.ind_buy or 0), "sell": int(row.ind_sell or 0),
+                 "net": int((row.ind_buy or 0) - (row.ind_sell or 0))},
+            ]
+            result = {"rows": rows, "market": market, "date": to_date}
+            cache.set(cache_key, result, ttl=Config.CACHE_TTL_MARKET)
+            return result
+    except Exception as e:
+        logger.warning("시장 투자자 DB 집계 실패 (daily_investor_trading): %s", e)
+
+    # 3순위: pykrx fallback (금융투자/보험/투신 등 세부 분류)
     try:
         df = krx_stock.get_market_trading_value_by_investor(
             _yyyymmdd(from_date), _yyyymmdd(to_date), market
